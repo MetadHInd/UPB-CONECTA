@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: build-and-test
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ping:1})' --quiet"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 10s
+
+    env:
+      MONGODB_URI: mongodb://localhost:27017
+      MONGODB_DATABASE: upb_conecta
+      MONGODB_TEST_DATABASE: upb_conecta_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Regla de dependencia hexagonal (RNF-41)
+        run: npm run check:architecture
+
+      - name: Tests (unitarios + integración contra MongoDB real) y cobertura (umbral 80%)
+        run: npm run test:coverage
+
+      - name: Auditoría de seguridad (dependencias de producción)
+        run: npm audit --omit=dev --audit-level=high
