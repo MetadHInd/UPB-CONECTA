@@ -10,9 +10,9 @@
     "verbatimModuleSyntax": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "outDir": "dist",
-    "rootDir": ".",
+    "outDir": "../dist",
+    "rootDir": "..",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.mjs"]
+  "include": ["../src/**/*.ts", "../tests/**/*.ts", "../scripts/**/*.mjs"]
 }

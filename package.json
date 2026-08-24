@@ -4,10 +4,10 @@
   "description": "UPB Conecta - Contexto de ingesta del buzon institucional recolector (HU-01, RF-01, RF-02)",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "build": "tsc -p config/tsconfig.json",
+    "typecheck": "tsc -p config/tsconfig.json --noEmit",
+    "test": "vitest run --config config/vitest.config.ts",
+    "test:coverage": "vitest run --config config/vitest.config.ts --coverage",
     "check:architecture": "node scripts/check-architecture.mjs"
   },
   "dependencies": {
