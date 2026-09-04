@@ -88,7 +88,7 @@ cp .env.example .env
 npm install
 npm run typecheck            # TypeScript estricto
 npm run check:architecture   # RNF-41: el dominio no puede importar infraestructura
-npm test                     # 49 pruebas (requiere MongoDB corriendo)
+npm test                     # 51 pruebas (requiere MongoDB corriendo)
 npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 npm run build                # compila a dist/
 ```
