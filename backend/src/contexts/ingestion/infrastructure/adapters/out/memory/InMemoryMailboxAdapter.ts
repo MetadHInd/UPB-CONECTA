@@ -13,6 +13,7 @@ import type { RawInstitutionalMessage } from '../../../../domain/entities/RawIns
  */
 export class InMemoryMailboxAdapter implements MailboxIngestionPort {
   private failure: string | null = null;
+  private onUntranslatable: (uid: number, cause: string) => void = () => {};
 
   constructor(private readonly messages: readonly RawInstitutionalMessage[]) {}
 
@@ -29,5 +30,9 @@ export class InMemoryMailboxAdapter implements MailboxIngestionPort {
   /** Permite a las pruebas simular la indisponibilidad de la fuente (RNF-44). */
   simulateUnavailability(cause: string | null): void {
     this.failure = cause;
+  }
+
+  setOnUntranslatable(handler: (uid: number, cause: string) => void): void {
+    this.onUntranslatable = handler;
   }
 }

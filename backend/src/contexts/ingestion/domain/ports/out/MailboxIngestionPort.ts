@@ -14,6 +14,12 @@ export interface MailboxIngestionPort {
    * de uid y acotados por el tamano de lote configurado.
    */
   fetchUnprocessed(cursor: IngestionCursor, batchSize: number): Promise<RawInstitutionalMessage[]>;
+  /**
+   * Opcional: algunos adaptadores (por ejemplo IMAP) pueden reportar mensajes
+   * no traducibles por falta de identidad; el orquestador puede suscribirse
+   * para que la ejecución en curso contabilice los mensajes en cuarentena.
+   */
+  setOnUntranslatable?(handler: (uid: number, cause: string) => void): void;
 }
 
 export class MailboxUnavailableError extends Error {

@@ -39,8 +39,12 @@ export class ImapMailboxAdapter implements MailboxIngestionPort {
   constructor(
     private readonly client: ImapClient,
     private readonly mailboxName: string,
-    private readonly onUntranslatable: (uid: number, cause: string) => void = () => {}
+    private onUntranslatable: (uid: number, cause: string) => void = () => {}
   ) {}
+
+  setOnUntranslatable(handler: (uid: number, cause: string) => void): void {
+    this.onUntranslatable = handler;
+  }
 
   async fetchUnprocessed(cursor: IngestionCursor, batchSize: number): Promise<RawInstitutionalMessage[]> {
     let envelopes: ImapEnvelope[];

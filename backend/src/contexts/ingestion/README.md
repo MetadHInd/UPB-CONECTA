@@ -146,18 +146,46 @@ Historia HU-54. Resumen de lo realizado y decisiones tomadas:
     corresponde a la capa de presentación (feed/API) y no existe en este
     repositorio — por tanto se documenta como limitación, no como incumplida.
 - **Criterio 6 (mensajes con formato inesperado terminan en cuarentena)**:
-  - Gap: `IngestionRunLog` tiene `recordQuarantined()` y un contador `quarantined`, pero
-    hoy **ninguna** parte del orquestador invoca ese método. La responsabilidad
-    completa de derivar a cuarentena (persistencia y revisión) corresponde a
-    HU-04, que no está implementada aquí.
-  - Decisión: **Opción B (conservadora)** — no se conectó automática ni
-    implícitamente el callback `onUntranslatable` a la bitácora en este punto.
-    En lugar de modificar la interfaz del puerto o el caso de uso, se documenta
-    esta dependencia pendiente y el patrón a seguir cuando se implemente HU-04:
-    el adaptador `ImapMailboxAdapter` ya expone `onUntranslatable(uid, cause)`;
-    el orquestador (por ejemplo `main.ts`) deberá suscribir ese callback y
-    llamar a `log.recordQuarantined()` durante la ejecución en curso. Esta
-    decisión minimiza cambios de superficie y mantiene el dominio aislado.
+  - Gap: `IngestionRunLog` tiene `recordQuarantined()` y un contador `quarantined`.
+    En la implementación actual (rama de trabajo) el orquestador suscribe el
+    callback `onUntranslatable` y durante la ejecución en curso llama a
+    `log.recordQuarantined()`. IMPORTANTE: en esta solución la llamada a
+    `recordQuarantined()` **no** avanza el `IngestionCursor`. Por tanto, el
+    mensaje marcado como en cuarentena puede volver a ser reportado por el
+    buzón en ejecuciones posteriores del scheduler hasta que HU-04 implemente
+    la exclusión persistente (por ejemplo, marcar el UID como "visto pero en
+    cuarentena" o persistir una lista de cuarentenados que el adaptador
+    consulte antes de devolver mensajes).
+
+  - Justificación y alternativas consideradas:
+    - Se consideró añadir inmediatamente una entrada en un registro de
+      "ya vistos, aunque no procesados" para evitar re-reportes infinitos
+      (es decir, marcar UIDs quarantined como "visto" en el `ProcessedMessageRegistry`
+      o en un repositorio ad-hoc). Sin embargo, se decidió dejar esa
+      responsabilidad para HU-04 por las siguientes razones:
+      1. Semántica ambigua: marcar un mensaje en cuarentena como "visto"
+         puede enmascarar errores y producir pérdida silenciosa si la cuarentena
+         no se gestiona con una interfaz humana (revisión/reprocesado).
+      2. Persistencia y flujo de trabajo: implementar correctamente la
+         exclusión persistente requiere diseño de persistencia y una UI/flujo
+         de revisión (HU-04), no sólo un flag técnico; implementarlo ahora
+         habría introducido trabajo incompleto y decisiones de UX fuera de
+         alcance para esta historia.
+      3. Consistencia e idempotencia: el `ProcessedMessageRegistry` tiene
+         responsabilidades claras sobre qué se considera "procesado". Reusar
+         ese repositorio para marcar cuarentenados mezclará semánticas y
+         complicará las pruebas de idempotencia sin antes acordar las garantías
+         de HU-04.
+      4. Complejidad operacional: una solución ad-hoc rápida puede generar
+         condiciones de carrera entre múltiples instancias del scheduler y
+         requerir bloqueos/locks que son mejor diseñados con el alcance de
+         HU-04.
+
+    Por estas razones, la decisión actual ha sido implementar la contabilización
+    en la ejecución (visibilidad en `IngestionRunLog`) para que los equipos vean
+    cuándo ocurren cuarentenas, y posponer la exclusión persistente y la
+    política de "visto pero no procesado" a HU-04 donde se resolverán la
+    persistencia, la interfaz de revisión y las garantías de idempotencia.
 - **Criterio 7 (dobles en memoria para pruebas de casos de uso)**:
   - Confirmado: todas las pruebas bajo `tests/domain/` y `tests/application/`
     corren contra dobles en memoria y no requieren red ni base de datos. Las

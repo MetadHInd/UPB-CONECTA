@@ -25,6 +25,9 @@ export class IngestionRunLog {
   recordProcessed(): void { this._processed += 1; }
   recordDuplicate(): void { this._duplicated += 1; }
   recordQuarantined(): void { this._quarantined += 1; }
+  // debug hook
+  // recordQuarantined calls could be instrumented during development,
+  // but avoid console output in committed code.
 
   recordIncident(messageId: string | null, cause: string, occurredAt: Date): void {
     this._incidents.push({ messageId, cause, occurredAt });
