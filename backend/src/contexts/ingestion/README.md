@@ -2,8 +2,9 @@
 
 > Documentación específica de este contexto acotado. Para la visión general del proyecto, la arquitectura y cómo levantar todo el entorno (incluyendo MongoDB), ver el [README raíz](../../../README.md).
 
-Implementacion de **HU-01 (SCRUM-13): Conexion programada e idempotente al buzon institucional recolector**.
-Trazabilidad: RF-01, RF-02. Caso de uso CU-01, pasos 1, 2 y 5, flujo alternativo A.
+Implementacion de **HU-01 (SCRUM-13): Conexion programada e idempotente al buzon institucional recolector**
+y **HU-02 (SCRUM-14): Extraccion de metadatos y normalizacion del cuerpo del mensaje**.
+Trazabilidad: RF-01, RF-02, RF-03, RF-04. Caso de uso CU-01, pasos 1 a 5, flujo alternativo A.
 
 ## Stack
 
@@ -22,7 +23,7 @@ TypeScript sobre Node.js, MongoDB como motor documental, Vitest para pruebas.
     npm install
     npm run typecheck            # TypeScript estricto
     npm run check:architecture   # regla de dependencia (RNF-41)
-    npm test                     # 49 pruebas (requiere MongoDB real corriendo, ver README raíz)
+    npm test                     # 76 pruebas (requiere MongoDB real corriendo, ver README raíz)
     npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 
 ## Criterios de aceptacion y donde se verifican
@@ -36,6 +37,30 @@ TypeScript sobre Node.js, MongoDB como motor documental, Vitest para pruebas.
 | 5. Un fallo a mitad de lote conserva el punto de lectura | `IngestInstitutionalMessages.test.ts`, `IngestionCursor.test.ts`, `MongoIngestionCursorRepository.integration.test.ts` |
 | RF-07. Bitácora de ingesta consultable | `MongoIngestionRunLogRepository.integration.test.ts` |
 | HU-05. Reintento con espera exponencial ante indisponibilidad del buzón y Circuit Breaker | `RetryingMailboxAdapter.test.ts`, `CircuitBreakerMailboxAdapter.test.ts` |
+
+## HU-02 — Extracción de metadatos y normalización del cuerpo (RF-03, RF-04)
+
+Traduce cada `RawInstitutionalMessage` (HU-01, sin normalizar) a un
+`InstitutionalMessage`: remitente, asunto, cuerpo en texto plano, fecha de
+envío y destinatarios declarados, listo para el clasificador (HU-06 en
+adelante). Vive enteramente en infraestructura
+(`infrastructure/normalization/MimeMessageNormalizer.ts`) — el dominio no
+sabe que existe MIME, HTML ni juegos de caracteres; esa es la frontera ACL
+que exige el diseño de la historia (revisión de literatura, sección 5.2).
+
+No se integró en `MailboxIngestionPort` ni en el caso de uso `IngestInstitutionalMessages`:
+la idempotencia (HU-01) sólo necesita `messageId` y `mailboxUid`, no el cuerpo normalizado, así
+que forzar esa dependencia habría acoplado dos historias sin necesidad. El normalizador queda
+listo para que el contexto de clasificación lo consuma cuando exista.
+
+| Criterio | Prueba |
+|---|---|
+| 1. Extrae remitente, asunto, cuerpo, fecha de envío y destinatarios en `InstitutionalMessage` | `MimeMessageNormalizer.test.ts` — criterio 1 |
+| 2. HTML a texto plano legible conservando todas las direcciones web | `MimeMessageNormalizer.test.ts` — criterio 2 |
+| 3. Elimina firma institucional, aviso legal y cadena de reenvío | `MimeMessageNormalizer.test.ts` — criterio 3 |
+| 4. Codificación no UTF-8 o caracteres acentuados mal codificados se conservan sin corrupción | `MimeMessageNormalizer.test.ts` — criterio 4 |
+| 5. Un adjunto no interrumpe el procesamiento y su presencia queda como metadato | `MimeMessageNormalizer.test.ts` — criterio 5 |
+| Definición de terminado: ≥ 15 correos institucionales anonimizados (HTML, texto plano, multiparte, reenvío) | `infrastructure/fixtures/institutionalMessageSources.ts` (19 fixtures) |
 
 ## HU-53 — Verificación del aislamiento del dominio (RNF-41, RNF-42)
 

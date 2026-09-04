@@ -20,14 +20,14 @@ UPB Conecta ataca específicamente ese vacío: agregación, segmentación y opor
 
 ## Estado actual del código
 
-Este proyecto (backend, subcarpeta `backend/` del repositorio) implementa, por ahora, tres historias del Sprint 1: **HU-01 (SCRUM-13)** — conexión programada e idempotente al buzón institucional recolector, el primer eslabón del pipeline de ingesta (EP-01), base de todo lo demás: sin ingesta no hay clasificación, sin clasificación no hay feed, sin feed no hay notificaciones — junto con **HU-05** (resiliencia del buzón) y **HU-53** (verificación automatizada de la arquitectura).
+Este proyecto (backend, subcarpeta `backend/` del repositorio) implementa, por ahora, cuatro historias del Sprint 1: **HU-01 (SCRUM-13)** — conexión programada e idempotente al buzón institucional recolector, el primer eslabón del pipeline de ingesta (EP-01), base de todo lo demás: sin ingesta no hay clasificación, sin clasificación no hay feed, sin feed no hay notificaciones — junto con **HU-02** (extracción de metadatos y normalización del cuerpo), **HU-05** (resiliencia del buzón) y **HU-53** (verificación automatizada de la arquitectura).
 
-El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificación de Requerimientos y el Product Backlog del proyecto) vive en Jira. El **Sprint 1** activo agrupa, además de estas tres, las historias que comparten su mismo riesgo técnico — ingesta y arquitectura verificable:
+El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificación de Requerimientos y el Product Backlog del proyecto) vive en Jira. El **Sprint 1** activo agrupa, además de estas cuatro, las historias que comparten su mismo riesgo técnico — ingesta y arquitectura verificable:
 
 | Historia | Qué cubre |
 |---|---|
 | HU-01 *(implementada aquí)* | Conexión programada e idempotente al buzón institucional |
-| HU-02 | Extracción de metadatos y normalización del cuerpo del mensaje |
+| HU-02 *(implementada aquí)* | Extracción de metadatos y normalización del cuerpo del mensaje |
 | HU-05 *(implementada aquí)* | Reintento con espera exponencial y circuit breaker ante indisponibilidad del buzón |
 | HU-53 *(implementada aquí)* | Aislamiento del dominio verificable y sustituibilidad de los adaptadores |
 | HU-54 | Cobertura de pruebas bajo TDD y dobles para escenarios de falla externa |
@@ -44,7 +44,7 @@ A medida que se implementen más historias, se añadirán más carpetas bajo `sr
 src/contexts/ingestion/
   domain/          value objects, entidades, políticas y puertos (in/out). No importa infraestructura.
   application/     el caso de uso. Orquesta puertos, no conoce IMAP ni MongoDB.
-  infrastructure/  configuración, planificador y adaptadores: mongo/, imap/, memory/, resilience/ (retry + circuit breaker).
+  infrastructure/  configuración, planificador, normalización MIME (HU-02) y adaptadores: mongo/, imap/, memory/, resilience/ (retry + circuit breaker).
 src/main.ts        raíz de composición: único lugar donde se eligen los adaptadores concretos.
 ```
 
@@ -88,7 +88,7 @@ cp .env.example .env
 npm install
 npm run typecheck            # TypeScript estricto
 npm run check:architecture   # RNF-41: el dominio no puede importar infraestructura
-npm test                     # 56 pruebas (requiere MongoDB corriendo)
+npm test                     # 76 pruebas (requiere MongoDB corriendo)
 npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 npm run build                # compila a dist/
 ```
