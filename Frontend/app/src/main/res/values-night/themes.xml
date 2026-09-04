@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.UPBConecta" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#0F1330</item>
+        <item name="android:windowBackground">#0F1330</item>
+    </style>
+</resources>

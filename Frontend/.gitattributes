@@ -1,0 +1,17 @@
+# Normaliza finales de línea a LF en el repositorio, sin importar el sistema
+# operativo desde el que se edite o clone. Evita que Git marque como
+# "modificado" un archivo completo solo por diferencias LF/CRLF (el aviso de
+# "This diff contains a change in line endings from LF to CRLF" en GitHub
+# Desktop) y evita diffs enormes por finales de línea cuando varias personas
+# del equipo trabajan en Windows/Mac/Linux.
+* text=auto eol=lf
+
+# Binarios: nunca tocar sus bytes.
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.keystore binary
+*.jks binary

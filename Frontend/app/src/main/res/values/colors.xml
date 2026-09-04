@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Colores usados solo por los recursos XML (tema previo a Compose e
+         ícono de lanzador). La paleta que usa la UI en Compose vive en
+         ui/theme/Color.kt — mantener ambos en sync si se ajusta la marca. -->
+    <color name="upb_azul_marino">#16215C</color>
+    <color name="upb_fondo_claro">#FFFFFF</color>
+    <color name="ic_launcher_background">#FFFFFF</color>
+</resources>

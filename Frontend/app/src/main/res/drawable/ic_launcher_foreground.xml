@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:aapt="http://schemas.android.com/aapt"
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Marca simple: un solo círculo en el degradado rosa→morado de marca
+         (el mismo que usa el logotipo "UPB" del splash y de la barra
+         superior), en vez de los anillos rojo/morado/azul marino previos —
+         se ve como una sola pieza de marca y no como un blanco/diana.
+         Reemplazar por el logo oficial de UPB Conecta cuando exista. -->
+    <path android:pathData="M20,54 a34,34 0 1,0 68,0 a34,34 0 1,0 -68,0 z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="20"
+                android:startY="20"
+                android:endX="88"
+                android:endY="88"
+                android:startColor="#E5006D"
+                android:endColor="#7B2FF7" />
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="#16215C"
+        android:pathData="M44,54 a10,10 0 1,0 20,0 a10,10 0 1,0 -20,0 z" />
+</vector>

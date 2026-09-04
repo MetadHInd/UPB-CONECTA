@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Sin reglas específicas todavía: este front preliminar no persiste
+         datos de usuario en disco (todo es en memoria / simulado). -->
+</full-backup-content>
