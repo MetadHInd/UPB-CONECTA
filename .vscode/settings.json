@@ -1,0 +1,19 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^sudo pacman -Syu --noconfirm mongodb$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "true": true,
+        "git add": true,
+        "git commit": true,
+        "/^cd backend && npm run typecheck && npm run check:architecture$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^npx vitest run tests/application tests/domain --config config/vitest\\.config\\.ts --coverage$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

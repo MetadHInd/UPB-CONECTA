@@ -37,6 +37,24 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
     const { mailbox, cursors, logs, clock, batchSize } = this.deps;
     const log = new IngestionRunLog(clock.now());
 
+    // Suscribir el callback de mensajes no traducibles para que la ejecucion
+    // en curso contabilice los mensajes en cuarentena sin violar la regla
+    // de capas: la suscripcion es orquestacion y ocurre aqui, en la
+    // composicion/ejecucion del caso de uso.
+    if (typeof (mailbox as any).setOnUntranslatable === 'function') {
+      (mailbox as any).setOnUntranslatable((uid: number, _cause: string) => {
+        // Mensaje en cuarentena: contabilizamos en la bitácora de la
+        // ejecución actual llamando a `recordQuarantined()` **pero NO
+        // avanzamos el cursor** aquí. Debido a esto, el UID marcado como
+        // cuarentenado puede volver a aparecer en ejecuciones posteriores
+        // del scheduler hasta que HU-04 implemente la exclusión persistente
+        // (persistir un estado "visto/no procesado" o una lista de
+        // cuarentenados). Ver `src/contexts/ingestion/README.md` para la
+        // justificación del diseño y las alternativas consideradas.
+        log.recordQuarantined();
+      });
+    }
+
     let cursor = await cursors.load();
     const batch = await mailbox.fetchUnprocessed(cursor, batchSize);
 
