@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tema mínimo a nivel de manifiesto: solo controla la ventana antes
+         de que Compose tome el control (ver MainActivity + UPBConectaTheme).
+         Se apoya en el tema de plataforma para no depender de AppCompat u
+         otra librería de vistas XML, ya que toda la UI es Compose. Barra de
+         estado blanca con íconos oscuros, a tono con el menú blanco de las
+         apps institucionales de la UPB. -->
+    <style name="Theme.UPBConecta" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/upb_fondo_claro</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/upb_fondo_claro</item>
+    </style>
+</resources>
