@@ -18,7 +18,10 @@ class FakeMailbox {
   async fetchUnprocessed(_cursor: any, _batchSize: number): Promise<RawInstitutionalMessage[]> {
     // Simular que el primer mensaje es no traducible y notificar, y devolver
     // el resto del lote para que la ejecucion continue sin interrumpir.
-    if (this.messages.length > 0) this.handler(this.messages[0].mailboxUid, 'invalid message-id');
+    if (this.messages.length > 0) {
+      const uid = this.messages[0]?.mailboxUid;
+      if (uid !== undefined) this.handler(uid, 'invalid message-id');
+    }
     return this.messages.slice(1);
   }
 }
