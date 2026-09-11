@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { IngestInstitutionalMessages } from '../../src/contexts/ingestion/application/IngestInstitutionalMessages.js';
 import { IdempotencyPolicy } from '../../src/contexts/ingestion/domain/services/IdempotencyPolicy.js';
+import { DeduplicationPolicy } from '../../src/contexts/ingestion/domain/services/DeduplicationPolicy.js';
 import { InMemoryProcessedMessageRegistry } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryProcessedMessageRegistry.js';
+import { InMemoryConsolidatedMessageRegistry } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryConsolidatedMessageRegistry.js';
 import { InMemoryIngestionCursorRepository } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryIngestionCursorRepository.js';
 import { InMemoryIngestionRunLogRepository } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryIngestionRunLogRepository.js';
 import { FixedClock } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/SystemClock.js';
+import { MimeMessageNormalizerAdapter } from '../../src/contexts/ingestion/infrastructure/adapters/out/normalization/MimeMessageNormalizerAdapter.js';
 import type { RawInstitutionalMessage } from '../../src/contexts/ingestion/domain/entities/RawInstitutionalMessage.js';
 
 // Doble de mailbox que simula llamar al callback onUntranslatable durante la
@@ -36,6 +39,7 @@ describe('IngestInstitutionalMessages — cuarentena (Opcion A)', () => {
 
     const mailbox = new FakeMailbox(messages);
     const registry = new InMemoryProcessedMessageRegistry();
+    const consolidatedRegistry = new InMemoryConsolidatedMessageRegistry();
     const cursors = new InMemoryIngestionCursorRepository();
     const logs = new InMemoryIngestionRunLogRepository();
     const clock = new FixedClock(new Date('2026-08-24T10:00:00Z'));
@@ -43,9 +47,13 @@ describe('IngestInstitutionalMessages — cuarentena (Opcion A)', () => {
     const useCase = new IngestInstitutionalMessages({
       mailbox: mailbox as any,
       registry,
+      consolidatedRegistry,
       cursors,
       logs,
       idempotency: new IdempotencyPolicy(registry),
+      deduplication: new DeduplicationPolicy(consolidatedRegistry),
+      deduplicationWindowMs: 30 * 24 * 60 * 60 * 1000,
+      normalizer: new MimeMessageNormalizerAdapter(),
       clock,
       batchSize: 200
     });

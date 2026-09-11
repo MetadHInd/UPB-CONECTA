@@ -2,9 +2,10 @@
 
 > Documentación específica de este contexto acotado. Para la visión general del proyecto, la arquitectura y cómo levantar todo el entorno (incluyendo MongoDB), ver el [README raíz](../../../README.md).
 
-Implementacion de **HU-01 (SCRUM-13): Conexion programada e idempotente al buzon institucional recolector**
-y **HU-02 (SCRUM-14): Extraccion de metadatos y normalizacion del cuerpo del mensaje**.
-Trazabilidad: RF-01, RF-02, RF-03, RF-04. Caso de uso CU-01, pasos 1 a 5, flujo alternativo A.
+Implementacion de **HU-01 (SCRUM-13): Conexion programada e idempotente al buzon institucional recolector**,
+**HU-02 (SCRUM-14): Extraccion de metadatos y normalizacion del cuerpo del mensaje** y
+**HU-03 (SCRUM-15): Deduplicacion por contenido dentro de ventana temporal configurable**.
+Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05. Caso de uso CU-01, pasos 1 a 5, flujo alternativo A.
 
 ## Stack
 
@@ -23,7 +24,7 @@ TypeScript sobre Node.js, MongoDB como motor documental, Vitest para pruebas.
     npm install
     npm run typecheck            # TypeScript estricto
     npm run check:architecture   # regla de dependencia (RNF-41)
-    npm test                     # 76 pruebas (requiere MongoDB real corriendo, ver README raíz)
+    npm test                     # 95 pruebas (requiere MongoDB real corriendo, ver README raíz)
     npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 
 ## Criterios de aceptacion y donde se verifican
@@ -48,10 +49,11 @@ adelante). Vive enteramente en infraestructura
 sabe que existe MIME, HTML ni juegos de caracteres; esa es la frontera ACL
 que exige el diseño de la historia (revisión de literatura, sección 5.2).
 
-No se integró en `MailboxIngestionPort` ni en el caso de uso `IngestInstitutionalMessages`:
-la idempotencia (HU-01) sólo necesita `messageId` y `mailboxUid`, no el cuerpo normalizado, así
-que forzar esa dependencia habría acoplado dos historias sin necesidad. El normalizador queda
-listo para que el contexto de clasificación lo consuma cuando exista.
+No se integró en `MailboxIngestionPort`: la idempotencia (HU-01) sólo necesita `messageId` y
+`mailboxUid`, no el cuerpo normalizado, así que ese puerto no lo requiere. Sí se conectó al caso
+de uso `IngestInstitutionalMessages` a partir de HU-03 (ver más abajo), a través del puerto
+`MessageNormalizerPort` — la deduplicación semántica necesita remitente, asunto y cuerpo ya
+normalizados para poder comparar reenvíos entre sí.
 
 | Criterio | Prueba |
 |---|---|
@@ -61,6 +63,31 @@ listo para que el contexto de clasificación lo consuma cuando exista.
 | 4. Codificación no UTF-8 o caracteres acentuados mal codificados se conservan sin corrupción | `MimeMessageNormalizer.test.ts` — criterio 4 |
 | 5. Un adjunto no interrumpe el procesamiento y su presencia queda como metadato | `MimeMessageNormalizer.test.ts` — criterio 5 |
 | Definición de terminado: ≥ 15 correos institucionales anonimizados (HTML, texto plano, multiparte, reenvío) | `infrastructure/fixtures/institutionalMessageSources.ts` (19 fixtures) |
+
+## HU-03 — Deduplicación por contenido en ventana temporal (RF-05, CU-01 paso 5)
+
+Un reenvío institucional (recordatorio de una convocatoria ya anunciada) llega con un
+`Message-ID` propio, así que `IdempotencyPolicy` (HU-01) lo deja pasar: esa política evita
+reprocesar el *mismo* mensaje, no reconoce que dos mensajes *distintos* son, en la práctica, el
+mismo aviso. `DeduplicationPolicy` (`domain/services/DeduplicationPolicy.ts`) resuelve esa
+deduplicación semántica: agrupa por remitente+asunto dentro de una ventana temporal
+configurable, ancla la ventana al **último** envío visto (no al primero, para no cortar una
+cadena de recordatorios periódicos), conserva la fecha del primer envío y cuenta los reenvíos.
+
+Se invoca en `IngestInstitutionalMessages.handle()` justo después de que `IdempotencyPolicy`
+aprueba el mensaje, sobre el `InstitutionalMessage` ya normalizado (de ahí que HU-03 conectara
+por primera vez `MimeMessageNormalizerAdapter` al caso de uso). El resultado se persiste vía
+`ConsolidatedMessageRegistryPort`, distinto de `ProcessedMessageRegistryPort`: uno resuelve
+idempotencia técnica por `Message-ID`, el otro deduplicación semántica por contenido.
+
+| Criterio | Prueba |
+|---|---|
+| 1. Mismo remitente y asunto dentro de la ventana → se consolidan en un único documento | `DeduplicationPolicy.test.ts`, `IngestInstitutionalMessages.test.ts` |
+| 2. La consolidación conserva la fecha del primer envío y cuenta los reenvíos | `DeduplicationPolicy.test.ts`, `MongoConsolidatedMessageRegistry.integration.test.ts` |
+| 3. Mismo asunto pero fuera de la ventana → convocatorias distintas | `DeduplicationPolicy.test.ts` (bordes de ventana), `MongoConsolidatedMessageRegistry.integration.test.ts` |
+| 4. La ventana cambia por variable de entorno sin redespliegue | `IngestionConfig.test.ts` (`DEDUPLICATION_WINDOW_MS`) |
+| 5. Un reenvío con cuerpo modificado actualiza el documento existente, no crea uno nuevo | `DeduplicationPolicy.test.ts`, `IngestInstitutionalMessages.test.ts` |
+| Definición de terminado: pruebas parametrizadas sobre los bordes de la ventana | `DeduplicationPolicy.test.ts` (`it.each` en `windowMs-1`, `windowMs`, `windowMs+1`) |
 
 ## HU-53 — Verificación del aislamiento del dominio (RNF-41, RNF-42)
 

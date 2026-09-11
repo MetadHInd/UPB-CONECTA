@@ -6,12 +6,22 @@ describe('readIngestionConfig, criterio de aceptacion 2', () => {
     const config = readIngestionConfig({});
     expect(config.intervalMs).toBe(300_000);
     expect(config.batchSize).toBe(200);
+    expect(config.deduplicationWindowMs).toBe(2_592_000_000);
   });
 
   it('toma el intervalo del entorno sin recompilar', () => {
     const config = readIngestionConfig({ INGESTION_INTERVAL_MS: '60000', INGESTION_BATCH_SIZE: '50' });
     expect(config.intervalMs).toBe(60_000);
     expect(config.batchSize).toBe(50);
+  });
+
+  it('HU-03 criterio 4: toma la ventana de deduplicacion del entorno sin redespliegue', () => {
+    const config = readIngestionConfig({ DEDUPLICATION_WINDOW_MS: '86400000' });
+    expect(config.deduplicationWindowMs).toBe(86_400_000);
+  });
+
+  it('rechaza una ventana de deduplicacion no numerica', () => {
+    expect(() => readIngestionConfig({ DEDUPLICATION_WINDOW_MS: 'siempre' })).toThrow(InvalidIngestionConfigError);
   });
 
   it('rechaza un intervalo por debajo del minimo que protege al buzon', () => {

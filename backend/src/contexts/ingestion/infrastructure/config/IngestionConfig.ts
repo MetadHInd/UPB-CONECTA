@@ -6,6 +6,8 @@
 export interface IngestionConfig {
   readonly intervalMs: number;
   readonly batchSize: number;
+  /** HU-03, criterio 4: la ventana de deduplicacion cambia por entorno, sin redespliegue. */
+  readonly deduplicationWindowMs: number;
 }
 
 export interface MailboxResilienceConfig {
@@ -27,6 +29,9 @@ const DEFAULT_INTERVAL_MS = 300_000; // cinco minutos
 const DEFAULT_BATCH_SIZE = 200;      // RNF-02 dimensiona el lote en 200 mensajes
 const MIN_INTERVAL_MS = 10_000;      // evita saturar el buzon institucional
 
+// HU-03: ventana por defecto para agrupar reenvios institucionales (RF-05)
+const DEFAULT_DEDUPLICATION_WINDOW_MS = 2_592_000_000; // 30 dias
+
 // Parametros por defecto para la politica de reintento (HU-05)
 const DEFAULT_MAILBOX_RETRY_MAX_ATTEMPTS = 3; // ademas del intento original
 const DEFAULT_MAILBOX_RETRY_BASE_MS = 1_000; // 1s
@@ -43,6 +48,11 @@ const MIN_MAILBOX_CIRCUIT_COOLDOWN_MS = 0;
 export function readIngestionConfig(env: NodeJS.ProcessEnv = process.env): IngestionConfig {
   const intervalMs = parsePositiveInteger(env['INGESTION_INTERVAL_MS'], DEFAULT_INTERVAL_MS, 'INGESTION_INTERVAL_MS');
   const batchSize = parsePositiveInteger(env['INGESTION_BATCH_SIZE'], DEFAULT_BATCH_SIZE, 'INGESTION_BATCH_SIZE');
+  const deduplicationWindowMs = parsePositiveInteger(
+    env['DEDUPLICATION_WINDOW_MS'],
+    DEFAULT_DEDUPLICATION_WINDOW_MS,
+    'DEDUPLICATION_WINDOW_MS'
+  );
 
   if (intervalMs < MIN_INTERVAL_MS) {
     throw new InvalidIngestionConfigError(
@@ -50,7 +60,7 @@ export function readIngestionConfig(env: NodeJS.ProcessEnv = process.env): Inges
     );
   }
 
-  return { intervalMs, batchSize };
+  return { intervalMs, batchSize, deduplicationWindowMs };
 }
 
 export function readMailboxResilienceConfig(env: NodeJS.ProcessEnv = process.env): MailboxResilienceConfig {
