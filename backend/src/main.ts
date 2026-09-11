@@ -1,13 +1,16 @@
 import { MongoClient } from 'mongodb';
 import { IngestInstitutionalMessages } from './contexts/ingestion/application/IngestInstitutionalMessages.js';
 import { IdempotencyPolicy } from './contexts/ingestion/domain/services/IdempotencyPolicy.js';
+import { DeduplicationPolicy } from './contexts/ingestion/domain/services/DeduplicationPolicy.js';
 import { readIngestionConfig } from './contexts/ingestion/infrastructure/config/IngestionConfig.js';
 import { IngestionScheduler } from './contexts/ingestion/infrastructure/scheduler/IngestionScheduler.js';
 import { MongoProcessedMessageRegistry } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoProcessedMessageRegistry.js';
+import { MongoConsolidatedMessageRegistry } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoConsolidatedMessageRegistry.js';
 import { MongoIngestionCursorRepository } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoIngestionCursorRepository.js';
 import { MongoIngestionRunLogRepository } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoIngestionRunLogRepository.js';
 import { InMemoryMailboxAdapter } from './contexts/ingestion/infrastructure/adapters/out/memory/InMemoryMailboxAdapter.js';
 import { SystemClock } from './contexts/ingestion/infrastructure/adapters/out/memory/SystemClock.js';
+import { MimeMessageNormalizerAdapter } from './contexts/ingestion/infrastructure/adapters/out/normalization/MimeMessageNormalizerAdapter.js';
 import { buildFixtureMessages } from './contexts/ingestion/infrastructure/fixtures/institutionalMessages.js';
 
 /**
@@ -23,17 +26,23 @@ async function bootstrap(): Promise<void> {
   const db = client.db(process.env['MONGODB_DATABASE'] ?? 'upb_conecta');
 
   await MongoProcessedMessageRegistry.ensureIndexes(db);
+  await MongoConsolidatedMessageRegistry.ensureIndexes(db);
   await MongoIngestionRunLogRepository.ensureIndexes(db);
 
   const registry = new MongoProcessedMessageRegistry(db);
+  const consolidatedRegistry = new MongoConsolidatedMessageRegistry(db);
   const mailbox = new InMemoryMailboxAdapter(buildFixtureMessages());
 
   const useCase = new IngestInstitutionalMessages({
     mailbox,
     registry,
+    consolidatedRegistry,
     cursors: new MongoIngestionCursorRepository(db),
     logs: new MongoIngestionRunLogRepository(db),
     idempotency: new IdempotencyPolicy(registry),
+    deduplication: new DeduplicationPolicy(consolidatedRegistry),
+    deduplicationWindowMs: config.deduplicationWindowMs,
+    normalizer: new MimeMessageNormalizerAdapter(),
     clock: new SystemClock(),
     batchSize: config.batchSize
   });

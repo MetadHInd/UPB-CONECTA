@@ -2,19 +2,26 @@ import { IngestionRunLog } from '../domain/entities/IngestionRunLog.js';
 import type { RawInstitutionalMessage } from '../domain/entities/RawInstitutionalMessage.js';
 import type { IngestionCursor } from '../domain/value-objects/IngestionCursor.js';
 import type { IdempotencyPolicy } from '../domain/services/IdempotencyPolicy.js';
+import type { DeduplicationPolicy } from '../domain/services/DeduplicationPolicy.js';
 import type { MailboxIngestionPort } from '../domain/ports/out/MailboxIngestionPort.js';
 import type { ProcessedMessageRegistryPort } from '../domain/ports/out/ProcessedMessageRegistryPort.js';
+import type { ConsolidatedMessageRegistryPort } from '../domain/ports/out/ConsolidatedMessageRegistryPort.js';
 import type { IngestionCursorRepositoryPort } from '../domain/ports/out/IngestionCursorRepositoryPort.js';
 import type { IngestionRunLogRepositoryPort } from '../domain/ports/out/IngestionRunLogRepositoryPort.js';
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
 import type { IngestInstitutionalMessagesPort } from '../domain/ports/in/IngestInstitutionalMessagesPort.js';
+import type { MessageNormalizerPort } from '../domain/ports/out/MessageNormalizerPort.js';
 
 export interface IngestInstitutionalMessagesDependencies {
   readonly mailbox: MailboxIngestionPort;
   readonly registry: ProcessedMessageRegistryPort;
+  readonly consolidatedRegistry: ConsolidatedMessageRegistryPort;
   readonly cursors: IngestionCursorRepositoryPort;
   readonly logs: IngestionRunLogRepositoryPort;
   readonly idempotency: IdempotencyPolicy;
+  readonly deduplication: DeduplicationPolicy;
+  readonly deduplicationWindowMs: number;
+  readonly normalizer: MessageNormalizerPort;
   readonly clock: ClockPort;
   readonly batchSize: number;
 }
@@ -92,9 +99,44 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
       return cursor.advanceTo(message.mailboxUid, clock.now());
     }
 
+    await this.consolidate(message);
     await registry.markAsProcessed(message.messageId, message.mailboxUid, clock.now());
     log.recordProcessed();
     return cursor.advanceTo(message.mailboxUid, clock.now());
+  }
+
+  /**
+   * HU-03 (RF-05): un mensaje que ya paso el filtro de idempotencia por
+   * Message-ID puede seguir siendo un reenvio semantico (mismo
+   * remitente+asunto dentro de la ventana). Aqui se decide si genera un
+   * documento nuevo, se consolida en el existente, o se actualiza su cuerpo.
+   */
+  private async consolidate(message: RawInstitutionalMessage): Promise<void> {
+    const { normalizer, deduplication, deduplicationWindowMs, consolidatedRegistry } = this.deps;
+    const normalized = normalizer.normalize(message);
+    const decision = await deduplication.decide(normalized, deduplicationWindowMs);
+
+    if (decision.kind === 'new') {
+      await consolidatedRegistry.save({
+        sender: normalized.sender,
+        subject: normalized.subject,
+        body: normalized.body,
+        firstSentAt: normalized.sentAt,
+        lastSentAt: normalized.sentAt,
+        resendCount: 0
+      });
+      return;
+    }
+
+    const { existing } = decision;
+    await consolidatedRegistry.save({
+      sender: existing.sender,
+      subject: existing.subject,
+      body: decision.kind === 'update-body' ? normalized.body : existing.body,
+      firstSentAt: existing.firstSentAt,
+      lastSentAt: normalized.sentAt,
+      resendCount: existing.resendCount + 1
+    });
   }
 
   private async persist(cursor: IngestionCursor, log: IngestionRunLog): Promise<void> {

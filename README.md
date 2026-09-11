@@ -29,6 +29,6 @@ Ver el README de cada subcarpeta para arquitectura, cómo levantar el entorno y 
 
 ## Estado actual
 
-- **Backend:** HU-01, HU-02, HU-05 y HU-53 implementadas, 76/76 pruebas en verde, CI con `main` protegida (PR obligatorio).
+- **Backend:** HU-01, HU-02, HU-03, HU-05 y HU-53 implementadas, 95/95 pruebas en verde, CI con `main` protegida (PR obligatorio).
 - **Frontend:** UI preliminar completa (splash, inicio, noticias, foro, mapa esquemático, chatbot, perfil) sobre datos mock; sin conexión real al backend todavía.
 - El resto del backlog (11 épicas, 51 historias restantes) vive en Jira sin código asociado.
