@@ -8,6 +8,8 @@ export interface IngestionConfig {
   readonly batchSize: number;
   /** HU-03, criterio 4: la ventana de deduplicacion cambia por entorno, sin redespliegue. */
   readonly deduplicationWindowMs: number;
+  /** HU-04, criterio 4: proporcion de cuarentena (0-1) que dispara revision prioritaria. */
+  readonly quarantineIncidentThresholdRatio: number;
 }
 
 export interface MailboxResilienceConfig {
@@ -32,6 +34,9 @@ const MIN_INTERVAL_MS = 10_000;      // evita saturar el buzon institucional
 // HU-03: ventana por defecto para agrupar reenvios institucionales (RF-05)
 const DEFAULT_DEDUPLICATION_WINDOW_MS = 2_592_000_000; // 30 dias
 
+// HU-04: proporcion de cuarentena por defecto que dispara revision prioritaria
+const DEFAULT_QUARANTINE_INCIDENT_THRESHOLD_RATIO = 0.2; // 20%
+
 // Parametros por defecto para la politica de reintento (HU-05)
 const DEFAULT_MAILBOX_RETRY_MAX_ATTEMPTS = 3; // ademas del intento original
 const DEFAULT_MAILBOX_RETRY_BASE_MS = 1_000; // 1s
@@ -53,6 +58,11 @@ export function readIngestionConfig(env: NodeJS.ProcessEnv = process.env): Inges
     DEFAULT_DEDUPLICATION_WINDOW_MS,
     'DEDUPLICATION_WINDOW_MS'
   );
+  const quarantineIncidentThresholdRatio = parseRatio(
+    env['QUARANTINE_INCIDENT_THRESHOLD_RATIO'],
+    DEFAULT_QUARANTINE_INCIDENT_THRESHOLD_RATIO,
+    'QUARANTINE_INCIDENT_THRESHOLD_RATIO'
+  );
 
   if (intervalMs < MIN_INTERVAL_MS) {
     throw new InvalidIngestionConfigError(
@@ -60,7 +70,7 @@ export function readIngestionConfig(env: NodeJS.ProcessEnv = process.env): Inges
     );
   }
 
-  return { intervalMs, batchSize, deduplicationWindowMs };
+  return { intervalMs, batchSize, deduplicationWindowMs, quarantineIncidentThresholdRatio };
 }
 
 export function readMailboxResilienceConfig(env: NodeJS.ProcessEnv = process.env): MailboxResilienceConfig {
@@ -103,6 +113,15 @@ function parseNonNegativeInteger(raw: string | undefined, fallback: number, name
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new InvalidIngestionConfigError(`${name} debe ser un entero no negativo, se recibio "${raw}"`);
+  }
+  return parsed;
+}
+
+function parseRatio(raw: string | undefined, fallback: number, name: string): number {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new InvalidIngestionConfigError(`${name} debe ser un numero entre 0 y 1, se recibio "${raw}"`);
   }
   return parsed;
 }

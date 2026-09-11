@@ -2,10 +2,12 @@ import { MongoClient } from 'mongodb';
 import { IngestInstitutionalMessages } from './contexts/ingestion/application/IngestInstitutionalMessages.js';
 import { IdempotencyPolicy } from './contexts/ingestion/domain/services/IdempotencyPolicy.js';
 import { DeduplicationPolicy } from './contexts/ingestion/domain/services/DeduplicationPolicy.js';
+import { QuarantineIncidentPolicy } from './contexts/ingestion/domain/services/QuarantineIncidentPolicy.js';
 import { readIngestionConfig } from './contexts/ingestion/infrastructure/config/IngestionConfig.js';
 import { IngestionScheduler } from './contexts/ingestion/infrastructure/scheduler/IngestionScheduler.js';
 import { MongoProcessedMessageRegistry } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoProcessedMessageRegistry.js';
 import { MongoConsolidatedMessageRegistry } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoConsolidatedMessageRegistry.js';
+import { MongoQuarantineRepository } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoQuarantineRepository.js';
 import { MongoIngestionCursorRepository } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoIngestionCursorRepository.js';
 import { MongoIngestionRunLogRepository } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoIngestionRunLogRepository.js';
 import { InMemoryMailboxAdapter } from './contexts/ingestion/infrastructure/adapters/out/memory/InMemoryMailboxAdapter.js';
@@ -37,11 +39,13 @@ async function bootstrap(): Promise<void> {
     mailbox,
     registry,
     consolidatedRegistry,
+    quarantine: new MongoQuarantineRepository(db),
     cursors: new MongoIngestionCursorRepository(db),
     logs: new MongoIngestionRunLogRepository(db),
     idempotency: new IdempotencyPolicy(registry),
     deduplication: new DeduplicationPolicy(consolidatedRegistry),
     deduplicationWindowMs: config.deduplicationWindowMs,
+    quarantineIncidentPolicy: new QuarantineIncidentPolicy(config.quarantineIncidentThresholdRatio),
     normalizer: new MimeMessageNormalizerAdapter(),
     clock: new SystemClock(),
     batchSize: config.batchSize
