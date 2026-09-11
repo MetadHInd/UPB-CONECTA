@@ -3,9 +3,10 @@
 > Documentación específica de este contexto acotado. Para la visión general del proyecto, la arquitectura y cómo levantar todo el entorno (incluyendo MongoDB), ver el [README raíz](../../../README.md).
 
 Implementacion de **HU-01 (SCRUM-13): Conexion programada e idempotente al buzon institucional recolector**,
-**HU-02 (SCRUM-14): Extraccion de metadatos y normalizacion del cuerpo del mensaje** y
-**HU-03 (SCRUM-15): Deduplicacion por contenido dentro de ventana temporal configurable**.
-Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05. Caso de uso CU-01, pasos 1 a 5, flujo alternativo A.
+**HU-02 (SCRUM-14): Extraccion de metadatos y normalizacion del cuerpo del mensaje**,
+**HU-03 (SCRUM-15): Deduplicacion por contenido dentro de ventana temporal configurable** y
+**HU-04 (SCRUM-16): Cuarentena de mensajes no procesables y bitacora de ingesta** (criterios 1-4; criterio 5 diferido, ver seccion propia).
+Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05, RF-06, RF-07. Caso de uso CU-01, pasos 1 a 5, flujo alternativo A, excepcion E2.
 
 ## Stack
 
@@ -24,7 +25,7 @@ TypeScript sobre Node.js, MongoDB como motor documental, Vitest para pruebas.
     npm install
     npm run typecheck            # TypeScript estricto
     npm run check:architecture   # regla de dependencia (RNF-41)
-    npm test                     # 95 pruebas (requiere MongoDB real corriendo, ver README raíz)
+    npm test                     # 109 pruebas (requiere MongoDB real corriendo, ver README raíz)
     npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 
 ## Criterios de aceptacion y donde se verifican
@@ -88,6 +89,43 @@ idempotencia técnica por `Message-ID`, el otro deduplicación semántica por co
 | 4. La ventana cambia por variable de entorno sin redespliegue | `IngestionConfig.test.ts` (`DEDUPLICATION_WINDOW_MS`) |
 | 5. Un reenvío con cuerpo modificado actualiza el documento existente, no crea uno nuevo | `DeduplicationPolicy.test.ts`, `IngestInstitutionalMessages.test.ts` |
 | Definición de terminado: pruebas parametrizadas sobre los bordes de la ventana | `DeduplicationPolicy.test.ts` (`it.each` en `windowMs-1`, `windowMs`, `windowMs+1`) |
+
+## HU-04 — Cuarentena de mensajes no procesables y bitácora (RF-06, RF-07, RNF-12, CU-01 E2)
+
+Un mensaje que `ImapMailboxAdapter` no puede traducir (hoy, por falta de `Message-ID`)
+ya no se descarta ni se limita a incrementar un contador: se persiste vía
+`QuarantineRepositoryPort` con su causa y su contenido crudo original, para que quede
+disponible para diagnóstico y, más adelante, para reprocesamiento. `MailboxIngestionPort`
+declara el nuevo tipo `UntranslatableMessage { mailboxUid, cause, rawSource }` — el
+callback `setOnUntranslatable` pasó de reportar solo `(uid, cause)` a reportar también
+el origen crudo.
+
+`QuarantineIncidentPolicy` (servicio de dominio) evalúa, al terminar cada ejecución, si
+la proporción de mensajes en cuarentena sobre el total intentado (`quarantined / (read +
+quarantined)`) supera un umbral configurable; si lo supera, marca `IngestionRunLog.priorityReview`.
+El umbral se calcula sobre el total intentado y no solo sobre `read` porque un mensaje en
+cuarentena nunca se cuenta como leído — dividir solo por `read` dejaría sin detectar el
+caso más grave, un lote enteramente en cuarentena (`read = 0`).
+
+**Alcance de esta historia (5 SP) vs. definido en Jira:** los criterios 1 (persistencia con
+causa, el lote continúa), 2 (bitácora — ya existía desde HU-01) y 3 (contenido crudo
+consultable) y 4 (umbral configurable) están implementados. El **criterio 5** (reprocesar un
+mensaje en cuarentena "corregido en la configuración" desde un panel, sin reingesta
+completa) queda **diferido**: requiere un punto de entrada que dispare el reprocesamiento
+de un UID específico, y ese punto de entrada es naturalmente HTTP — que el backend todavía
+no expone (mismo bloqueante documentado en el README raíz y en
+`Frontend/ARQUITECTURA-INTEGRACION.md`). Tampoco avanza el `IngestionCursor` para un UID en
+cuarentena, así que puede volver a reportarse en ejecuciones futuras hasta que ese
+mecanismo de reprocesamiento exista.
+
+| Criterio | Prueba |
+|---|---|
+| 1. Un mensaje no traducible se cuarentena con su causa y el lote continúa | `IngestInstitutionalMessages.quarantine.test.ts`, `ImapMailboxAdapter.test.ts` |
+| 2. La bitácora muestra leídos, procesados, duplicados y cuarentena con marca de tiempo | `IngestionRunLog` (ya cubierto desde HU-01) |
+| 3. El contenido crudo original queda disponible para diagnóstico | `IngestInstitutionalMessages.quarantine.test.ts`, `MongoQuarantineRepository.integration.test.ts` |
+| 4. Una proporción de cuarentena que supera el umbral marca el incidente para revisión prioritaria | `QuarantineIncidentPolicy.test.ts`, `IngestInstitutionalMessages.quarantine.test.ts` |
+| 5. Reprocesar un mensaje corregido sin reingesta completa | **Diferido** — necesita un punto de entrada HTTP que no existe todavía |
+| Definición de terminado: mensaje malformado en mitad del lote, los posteriores se procesan | `IngestInstitutionalMessages.quarantine.test.ts` |
 
 ## HU-53 — Verificación del aislamiento del dominio (RNF-41, RNF-42)
 
@@ -173,46 +211,13 @@ Historia HU-54. Resumen de lo realizado y decisiones tomadas:
     corresponde a la capa de presentación (feed/API) y no existe en este
     repositorio — por tanto se documenta como limitación, no como incumplida.
 - **Criterio 6 (mensajes con formato inesperado terminan en cuarentena)**:
-  - Gap: `IngestionRunLog` tiene `recordQuarantined()` y un contador `quarantined`.
-    En la implementación actual (rama de trabajo) el orquestador suscribe el
-    callback `onUntranslatable` y durante la ejecución en curso llama a
-    `log.recordQuarantined()`. IMPORTANTE: en esta solución la llamada a
-    `recordQuarantined()` **no** avanza el `IngestionCursor`. Por tanto, el
-    mensaje marcado como en cuarentena puede volver a ser reportado por el
-    buzón en ejecuciones posteriores del scheduler hasta que HU-04 implemente
-    la exclusión persistente (por ejemplo, marcar el UID como "visto pero en
-    cuarentena" o persistir una lista de cuarentenados que el adaptador
-    consulte antes de devolver mensajes).
-
-  - Justificación y alternativas consideradas:
-    - Se consideró añadir inmediatamente una entrada en un registro de
-      "ya vistos, aunque no procesados" para evitar re-reportes infinitos
-      (es decir, marcar UIDs quarantined como "visto" en el `ProcessedMessageRegistry`
-      o en un repositorio ad-hoc). Sin embargo, se decidió dejar esa
-      responsabilidad para HU-04 por las siguientes razones:
-      1. Semántica ambigua: marcar un mensaje en cuarentena como "visto"
-         puede enmascarar errores y producir pérdida silenciosa si la cuarentena
-         no se gestiona con una interfaz humana (revisión/reprocesado).
-      2. Persistencia y flujo de trabajo: implementar correctamente la
-         exclusión persistente requiere diseño de persistencia y una UI/flujo
-         de revisión (HU-04), no sólo un flag técnico; implementarlo ahora
-         habría introducido trabajo incompleto y decisiones de UX fuera de
-         alcance para esta historia.
-      3. Consistencia e idempotencia: el `ProcessedMessageRegistry` tiene
-         responsabilidades claras sobre qué se considera "procesado". Reusar
-         ese repositorio para marcar cuarentenados mezclará semánticas y
-         complicará las pruebas de idempotencia sin antes acordar las garantías
-         de HU-04.
-      4. Complejidad operacional: una solución ad-hoc rápida puede generar
-         condiciones de carrera entre múltiples instancias del scheduler y
-         requerir bloqueos/locks que son mejor diseñados con el alcance de
-         HU-04.
-
-    Por estas razones, la decisión actual ha sido implementar la contabilización
-    en la ejecución (visibilidad en `IngestionRunLog`) para que los equipos vean
-    cuándo ocurren cuarentenas, y posponer la exclusión persistente y la
-    política de "visto pero no procesado" a HU-04 donde se resolverán la
-    persistencia, la interfaz de revisión y las garantías de idempotencia.
+  - Implementado por HU-04 (ver sección propia más abajo): el mensaje se
+    persiste con su causa y contenido crudo vía `QuarantineRepositoryPort`, no
+    solo se contabiliza. Sigue sin avanzar el `IngestionCursor` para ese UID
+    (puede volver a reportarse en ejecuciones posteriores), porque excluirlo
+    de futuros fetches requiere un punto de entrada de reprocesamiento
+    (criterio 5 de HU-04) que a su vez depende de la capa HTTP que el backend
+    todavía no tiene — ver la nota al final de la sección HU-04.
 - **Criterio 7 (dobles en memoria para pruebas de casos de uso)**:
   - Confirmado: todas las pruebas bajo `tests/domain/` y `tests/application/`
     corren contra dobles en memoria y no requieren red ni base de datos. Las

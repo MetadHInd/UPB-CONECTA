@@ -2,12 +2,14 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { IngestInstitutionalMessages } from '../../src/contexts/ingestion/application/IngestInstitutionalMessages.js';
 import { IdempotencyPolicy } from '../../src/contexts/ingestion/domain/services/IdempotencyPolicy.js';
 import { DeduplicationPolicy } from '../../src/contexts/ingestion/domain/services/DeduplicationPolicy.js';
+import { QuarantineIncidentPolicy } from '../../src/contexts/ingestion/domain/services/QuarantineIncidentPolicy.js';
 import { MailboxUnavailableError } from '../../src/contexts/ingestion/domain/ports/out/MailboxIngestionPort.js';
 import type { ProcessedMessageRegistryPort } from '../../src/contexts/ingestion/domain/ports/out/ProcessedMessageRegistryPort.js';
 import type { MessageId } from '../../src/contexts/ingestion/domain/value-objects/MessageId.js';
 import { InMemoryMailboxAdapter } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryMailboxAdapter.js';
 import { InMemoryProcessedMessageRegistry } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryProcessedMessageRegistry.js';
 import { InMemoryConsolidatedMessageRegistry } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryConsolidatedMessageRegistry.js';
+import { InMemoryQuarantineRepository } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryQuarantineRepository.js';
 import { InMemoryIngestionCursorRepository } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryIngestionCursorRepository.js';
 import { InMemoryIngestionRunLogRepository } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryIngestionRunLogRepository.js';
 import { FixedClock } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/SystemClock.js';
@@ -34,6 +36,8 @@ function buildUseCase(overrides: { registry?: ProcessedMessageRegistryPort; dedu
     deduplication: new DeduplicationPolicy(consolidatedRegistry),
     deduplicationWindowMs: overrides.deduplicationWindowMs ?? DEDUPLICATION_WINDOW_MS,
     normalizer: new MimeMessageNormalizerAdapter(),
+    quarantine: new InMemoryQuarantineRepository(),
+    quarantineIncidentPolicy: new QuarantineIncidentPolicy(1),
     clock,
     batchSize: 200
   });
@@ -128,6 +132,8 @@ describe('IngestInstitutionalMessages, CU-01', () => {
       deduplication: new DeduplicationPolicy(consolidatedRegistry),
       deduplicationWindowMs: DEDUPLICATION_WINDOW_MS,
       normalizer: new MimeMessageNormalizerAdapter(),
+      quarantine: new InMemoryQuarantineRepository(),
+      quarantineIncidentPolicy: new QuarantineIncidentPolicy(1),
       clock: new FixedClock(new Date('2026-08-24T10:00:00Z')),
       batchSize: 200
     });
@@ -150,6 +156,8 @@ describe('IngestInstitutionalMessages, CU-01', () => {
       deduplication: new DeduplicationPolicy(consolidatedRegistry),
       deduplicationWindowMs: DEDUPLICATION_WINDOW_MS,
       normalizer: new MimeMessageNormalizerAdapter(),
+      quarantine: new InMemoryQuarantineRepository(),
+      quarantineIncidentPolicy: new QuarantineIncidentPolicy(1),
       clock: new FixedClock(new Date('2026-08-24T10:00:00Z')),
       batchSize: 2
     });
@@ -174,6 +182,8 @@ describe('IngestInstitutionalMessages, CU-01', () => {
           deduplication: new DeduplicationPolicy(consolidatedRegistry),
           deduplicationWindowMs: DEDUPLICATION_WINDOW_MS,
           normalizer: new MimeMessageNormalizerAdapter(),
+          quarantine: new InMemoryQuarantineRepository(),
+          quarantineIncidentPolicy: new QuarantineIncidentPolicy(1),
           clock: new FixedClock(new Date()),
           batchSize: 0
         })
@@ -249,6 +259,8 @@ cierre extendido al 27 de septiembre`
       deduplication: new DeduplicationPolicy(consolidatedRegistry),
       deduplicationWindowMs: DEDUPLICATION_WINDOW_MS,
       normalizer: new MimeMessageNormalizerAdapter(),
+      quarantine: new InMemoryQuarantineRepository(),
+      quarantineIncidentPolicy: new QuarantineIncidentPolicy(1),
       clock: new FixedClock(new Date('2026-09-10T10:00:00Z')),
       batchSize: 200
     });

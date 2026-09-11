@@ -17,7 +17,7 @@ describe('IngestionScheduler, criterios de aceptacion 1 y 2', () => {
 
   it('dispara el caso de uso en el intervalo configurado sin intervencion humana', async () => {
     const spy = useCaseSpy();
-    const scheduler = new IngestionScheduler(spy.port, () => ({ intervalMs: 60_000, batchSize: 200, deduplicationWindowMs: 2_592_000_000 }));
+    const scheduler = new IngestionScheduler(spy.port, () => ({ intervalMs: 60_000, batchSize: 200, deduplicationWindowMs: 2_592_000_000, quarantineIncidentThresholdRatio: 0.2 }));
 
     scheduler.start();
     expect(spy.calls()).toBe(0);
@@ -34,7 +34,7 @@ describe('IngestionScheduler, criterios de aceptacion 1 y 2', () => {
   it('aplica un cambio de intervalo sin reiniciar el proceso', async () => {
     const spy = useCaseSpy();
     let intervalMs = 60_000;
-    const scheduler = new IngestionScheduler(spy.port, () => ({ intervalMs, batchSize: 200, deduplicationWindowMs: 2_592_000_000 }));
+    const scheduler = new IngestionScheduler(spy.port, () => ({ intervalMs, batchSize: 200, deduplicationWindowMs: 2_592_000_000, quarantineIncidentThresholdRatio: 0.2 }));
 
     scheduler.start();
 
@@ -66,7 +66,7 @@ describe('IngestionScheduler, criterios de aceptacion 1 y 2', () => {
       }
     };
 
-    const scheduler = new IngestionScheduler(port, () => ({ intervalMs: 30_000, batchSize: 200, deduplicationWindowMs: 2_592_000_000 }), (e) => errores.push(e));
+    const scheduler = new IngestionScheduler(port, () => ({ intervalMs: 30_000, batchSize: 200, deduplicationWindowMs: 2_592_000_000, quarantineIncidentThresholdRatio: 0.2 }), (e) => errores.push(e));
     scheduler.start();
 
     await vi.advanceTimersByTimeAsync(30_000);
@@ -91,7 +91,7 @@ describe('IngestionScheduler, criterios de aceptacion 1 y 2', () => {
       }
     };
 
-    const scheduler = new IngestionScheduler(port, () => ({ intervalMs: 30_000, batchSize: 200, deduplicationWindowMs: 2_592_000_000 }));
+    const scheduler = new IngestionScheduler(port, () => ({ intervalMs: 30_000, batchSize: 200, deduplicationWindowMs: 2_592_000_000, quarantineIncidentThresholdRatio: 0.2 }));
     scheduler.start();
     await vi.advanceTimersByTimeAsync(300_000);
 
@@ -117,7 +117,7 @@ describe('IngestionScheduler, criterios de aceptacion 1 y 2', () => {
 
   it('es seguro llamar start dos veces y stop sin haber arrancado', () => {
     const spy = useCaseSpy();
-    const scheduler = new IngestionScheduler(spy.port, () => ({ intervalMs: 30_000, batchSize: 200, deduplicationWindowMs: 2_592_000_000 }));
+    const scheduler = new IngestionScheduler(spy.port, () => ({ intervalMs: 30_000, batchSize: 200, deduplicationWindowMs: 2_592_000_000, quarantineIncidentThresholdRatio: 0.2 }));
     scheduler.stop();
     scheduler.start();
     scheduler.start();

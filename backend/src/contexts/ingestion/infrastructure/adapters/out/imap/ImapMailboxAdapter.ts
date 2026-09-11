@@ -1,4 +1,4 @@
-import type { MailboxIngestionPort } from '../../../../domain/ports/out/MailboxIngestionPort.js';
+import type { MailboxIngestionPort, UntranslatableMessage } from '../../../../domain/ports/out/MailboxIngestionPort.js';
 import { MailboxUnavailableError } from '../../../../domain/ports/out/MailboxIngestionPort.js';
 import type { IngestionCursor } from '../../../../domain/value-objects/IngestionCursor.js';
 import type { RawInstitutionalMessage } from '../../../../domain/entities/RawInstitutionalMessage.js';
@@ -39,10 +39,10 @@ export class ImapMailboxAdapter implements MailboxIngestionPort {
   constructor(
     private readonly client: ImapClient,
     private readonly mailboxName: string,
-    private onUntranslatable: (uid: number, cause: string) => void = () => {}
+    private onUntranslatable: (message: UntranslatableMessage) => void = () => {}
   ) {}
 
-  setOnUntranslatable(handler: (uid: number, cause: string) => void): void {
+  setOnUntranslatable(handler: (message: UntranslatableMessage) => void): void {
     this.onUntranslatable = handler;
   }
 
@@ -81,7 +81,7 @@ export class ImapMailboxAdapter implements MailboxIngestionPort {
       if (error instanceof InvalidMessageIdError) {
         // Un mensaje sin identidad no puede sostener la garantia de idempotencia.
         // Se reporta para que HU-04 lo derive a cuarentena y el lote continua.
-        this.onUntranslatable(envelope.uid, error.message);
+        this.onUntranslatable({ mailboxUid: envelope.uid, cause: error.message, rawSource: envelope.source });
         return null;
       }
       throw error;

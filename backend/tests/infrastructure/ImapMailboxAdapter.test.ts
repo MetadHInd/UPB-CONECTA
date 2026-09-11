@@ -35,16 +35,16 @@ describe('ImapMailboxAdapter como capa anticorrupcion', () => {
   });
 
   it('reporta el mensaje sin identidad y continua con el resto del lote', async () => {
-    const reportados: number[] = [];
+    const reportados: { mailboxUid: number; rawSource: string }[] = [];
     const adapter = new ImapMailboxAdapter(
       client([envelope(101, '<a@upb.edu.co>'), envelope(102, undefined), envelope(103, '<c@upb.edu.co>')]),
       'INBOX',
-      (uid) => reportados.push(uid)
+      (m) => reportados.push({ mailboxUid: m.mailboxUid, rawSource: m.rawSource })
     );
 
     const messages = await adapter.fetchUnprocessed(IngestionCursor.initial(), 200);
     expect(messages).toHaveLength(2);
-    expect(reportados).toEqual([102]);
+    expect(reportados).toEqual([{ mailboxUid: 102, rawSource: '<p>cuerpo</p>' }]);
   });
 
   it('traduce cualquier fallo de red a MailboxUnavailableError', async () => {

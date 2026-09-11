@@ -3,9 +3,11 @@ import type { RawInstitutionalMessage } from '../domain/entities/RawInstitutiona
 import type { IngestionCursor } from '../domain/value-objects/IngestionCursor.js';
 import type { IdempotencyPolicy } from '../domain/services/IdempotencyPolicy.js';
 import type { DeduplicationPolicy } from '../domain/services/DeduplicationPolicy.js';
-import type { MailboxIngestionPort } from '../domain/ports/out/MailboxIngestionPort.js';
+import type { QuarantineIncidentPolicy } from '../domain/services/QuarantineIncidentPolicy.js';
+import type { MailboxIngestionPort, UntranslatableMessage } from '../domain/ports/out/MailboxIngestionPort.js';
 import type { ProcessedMessageRegistryPort } from '../domain/ports/out/ProcessedMessageRegistryPort.js';
 import type { ConsolidatedMessageRegistryPort } from '../domain/ports/out/ConsolidatedMessageRegistryPort.js';
+import type { QuarantineRepositoryPort } from '../domain/ports/out/QuarantineRepositoryPort.js';
 import type { IngestionCursorRepositoryPort } from '../domain/ports/out/IngestionCursorRepositoryPort.js';
 import type { IngestionRunLogRepositoryPort } from '../domain/ports/out/IngestionRunLogRepositoryPort.js';
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
@@ -16,11 +18,13 @@ export interface IngestInstitutionalMessagesDependencies {
   readonly mailbox: MailboxIngestionPort;
   readonly registry: ProcessedMessageRegistryPort;
   readonly consolidatedRegistry: ConsolidatedMessageRegistryPort;
+  readonly quarantine: QuarantineRepositoryPort;
   readonly cursors: IngestionCursorRepositoryPort;
   readonly logs: IngestionRunLogRepositoryPort;
   readonly idempotency: IdempotencyPolicy;
   readonly deduplication: DeduplicationPolicy;
   readonly deduplicationWindowMs: number;
+  readonly quarantineIncidentPolicy: QuarantineIncidentPolicy;
   readonly normalizer: MessageNormalizerPort;
   readonly clock: ClockPort;
   readonly batchSize: number;
@@ -41,29 +45,36 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
   }
 
   async execute(): Promise<IngestionRunLog> {
-    const { mailbox, cursors, logs, clock, batchSize } = this.deps;
+    const { mailbox, cursors, logs, clock, batchSize, quarantine, quarantineIncidentPolicy } = this.deps;
     const log = new IngestionRunLog(clock.now());
 
     // Suscribir el callback de mensajes no traducibles para que la ejecucion
-    // en curso contabilice los mensajes en cuarentena sin violar la regla
-    // de capas: la suscripcion es orquestacion y ocurre aqui, en la
-    // composicion/ejecucion del caso de uso.
-    if (typeof (mailbox as any).setOnUntranslatable === 'function') {
-      (mailbox as any).setOnUntranslatable((uid: number, _cause: string) => {
-        // Mensaje en cuarentena: contabilizamos en la bitácora de la
-        // ejecución actual llamando a `recordQuarantined()` **pero NO
-        // avanzamos el cursor** aquí. Debido a esto, el UID marcado como
-        // cuarentenado puede volver a aparecer en ejecuciones posteriores
-        // del scheduler hasta que HU-04 implemente la exclusión persistente
-        // (persistir un estado "visto/no procesado" o una lista de
-        // cuarentenados). Ver `src/contexts/ingestion/README.md` para la
-        // justificación del diseño y las alternativas consideradas.
+    // en curso los derive a cuarentena (HU-04) sin violar la regla de capas:
+    // la suscripcion es orquestacion y ocurre aqui, en la composicion/
+    // ejecucion del caso de uso. El callback es sincrono, asi que solo
+    // acumula; el guardado async ocurre despues de fetchUnprocessed().
+    const untranslatable: UntranslatableMessage[] = [];
+    if (mailbox.setOnUntranslatable) {
+      mailbox.setOnUntranslatable((message) => {
         log.recordQuarantined();
+        untranslatable.push(message);
       });
     }
 
     let cursor = await cursors.load();
     const batch = await mailbox.fetchUnprocessed(cursor, batchSize);
+
+    for (const message of untranslatable) {
+      await quarantine.save({
+        mailboxUid: message.mailboxUid,
+        cause: message.cause,
+        rawSource: message.rawSource,
+        quarantinedAt: clock.now()
+      });
+      // Nota: el UID en cuarentena no avanza el cursor aqui. Puede volver a
+      // aparecer en ejecuciones posteriores hasta que exista un punto de
+      // entrada para reprocesarlo (criterio 5, diferido — ver README).
+    }
 
     for (const message of this.inAscendingUidOrder(batch)) {
       log.recordRead();
@@ -79,6 +90,9 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
     }
 
     log.finish(clock.now());
+    if (quarantineIncidentPolicy.exceedsThreshold(log)) {
+      log.markPriorityReview();
+    }
     await this.persist(cursor, log);
     await logs.save(log);
     return log;
