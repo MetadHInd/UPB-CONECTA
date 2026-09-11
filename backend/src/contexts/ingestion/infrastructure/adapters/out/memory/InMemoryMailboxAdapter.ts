@@ -1,4 +1,4 @@
-import type { MailboxIngestionPort } from '../../../../domain/ports/out/MailboxIngestionPort.js';
+import type { MailboxIngestionPort, UntranslatableMessage } from '../../../../domain/ports/out/MailboxIngestionPort.js';
 import { MailboxUnavailableError } from '../../../../domain/ports/out/MailboxIngestionPort.js';
 import type { IngestionCursor } from '../../../../domain/value-objects/IngestionCursor.js';
 import type { RawInstitutionalMessage } from '../../../../domain/entities/RawInstitutionalMessage.js';
@@ -13,7 +13,7 @@ import type { RawInstitutionalMessage } from '../../../../domain/entities/RawIns
  */
 export class InMemoryMailboxAdapter implements MailboxIngestionPort {
   private failure: string | null = null;
-  private onUntranslatable: (uid: number, cause: string) => void = () => {};
+  private onUntranslatable: (message: UntranslatableMessage) => void = () => {};
 
   constructor(private readonly messages: readonly RawInstitutionalMessage[]) {}
 
@@ -32,7 +32,7 @@ export class InMemoryMailboxAdapter implements MailboxIngestionPort {
     this.failure = cause;
   }
 
-  setOnUntranslatable(handler: (uid: number, cause: string) => void): void {
+  setOnUntranslatable(handler: (message: UntranslatableMessage) => void): void {
     this.onUntranslatable = handler;
   }
 }

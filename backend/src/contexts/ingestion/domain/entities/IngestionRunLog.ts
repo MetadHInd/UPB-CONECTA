@@ -18,6 +18,8 @@ export class IngestionRunLog {
   private _quarantined = 0;
   private _finishedAt: Date | null = null;
   private readonly _incidents: IngestionIncident[] = [];
+  // HU-04, criterio 4: senaliza que esta ejecucion necesita revision prioritaria.
+  private _priorityReview = false;
 
   constructor(readonly startedAt: Date) {}
 
@@ -25,9 +27,7 @@ export class IngestionRunLog {
   recordProcessed(): void { this._processed += 1; }
   recordDuplicate(): void { this._duplicated += 1; }
   recordQuarantined(): void { this._quarantined += 1; }
-  // debug hook
-  // recordQuarantined calls could be instrumented during development,
-  // but avoid console output in committed code.
+  markPriorityReview(): void { this._priorityReview = true; }
 
   recordIncident(messageId: string | null, cause: string, occurredAt: Date): void {
     this._incidents.push({ messageId, cause, occurredAt });
@@ -42,4 +42,5 @@ export class IngestionRunLog {
   get finishedAt(): Date | null { return this._finishedAt; }
   get incidents(): readonly IngestionIncident[] { return [...this._incidents]; }
   get hasIncidents(): boolean { return this._incidents.length > 0; }
+  get priorityReview(): boolean { return this._priorityReview; }
 }
