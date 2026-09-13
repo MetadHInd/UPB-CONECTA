@@ -16,6 +16,8 @@ function record(overrides: Partial<ConsolidatedMessageRecord> = {}): Consolidate
     firstSentAt: new Date('2026-09-10T08:00:00Z'),
     lastSentAt: new Date('2026-09-10T08:00:00Z'),
     resendCount: 0,
+    dueDate: { kind: 'sin-vencimiento' },
+    applicationLink: null,
     ...overrides
   };
 }

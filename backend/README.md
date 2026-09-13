@@ -20,9 +20,9 @@ UPB Conecta ataca específicamente ese vacío: agregación, segmentación y opor
 
 ## Estado actual del código
 
-Este proyecto (backend, subcarpeta `backend/` del repositorio) implementa, por ahora, seis historias entre el Sprint 1 y el Sprint 2: **HU-01 (SCRUM-13)** — conexión programada e idempotente al buzón institucional recolector, el primer eslabón del pipeline de ingesta (EP-01), base de todo lo demás: sin ingesta no hay clasificación, sin clasificación no hay feed, sin feed no hay notificaciones — junto con **HU-02** (extracción de metadatos y normalización del cuerpo), **HU-03** (deduplicación por contenido en ventana temporal), **HU-04** (cuarentena de mensajes no procesables y bitácora, criterios 1-4), **HU-05** (resiliencia del buzón) y **HU-53** (verificación automatizada de la arquitectura).
+Este proyecto (backend, subcarpeta `backend/` del repositorio) implementa, por ahora, siete historias entre el Sprint 1 y el Sprint 2: **HU-01 (SCRUM-13)** — conexión programada e idempotente al buzón institucional recolector, el primer eslabón del pipeline de ingesta (EP-01), base de todo lo demás: sin ingesta no hay clasificación, sin clasificación no hay feed, sin feed no hay notificaciones — junto con **HU-02** (extracción de metadatos y normalización del cuerpo), **HU-03** (deduplicación por contenido en ventana temporal), **HU-04** (cuarentena de mensajes no procesables y bitácora, criterios 1-4), **HU-05** (resiliencia del buzón), **HU-08** (extracción de fecha de cierre y enlace de postulación) y **HU-53** (verificación automatizada de la arquitectura).
 
-El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificación de Requerimientos y el Product Backlog del proyecto) vive en Jira. Los sprints activos agrupan, además de estas seis, las historias que comparten su mismo riesgo técnico — ingesta, deduplicación y arquitectura verificable:
+El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificación de Requerimientos y el Product Backlog del proyecto) vive en Jira. Los sprints activos agrupan, además de estas siete, las historias que comparten su mismo riesgo técnico — ingesta, deduplicación, clasificación temprana y arquitectura verificable:
 
 | Historia | Qué cubre |
 |---|---|
@@ -31,6 +31,7 @@ El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificació
 | HU-03 *(implementada aquí)* | Deduplicación por contenido dentro de ventana temporal configurable |
 | HU-04 *(implementada aquí, criterios 1-4)* | Cuarentena de mensajes no procesables y bitácora de ingesta |
 | HU-05 *(implementada aquí)* | Reintento con espera exponencial y circuit breaker ante indisponibilidad del buzón |
+| HU-08 *(implementada aquí)* | Extracción de fecha de cierre y enlace de postulación |
 | HU-53 *(implementada aquí)* | Aislamiento del dominio verificable y sustituibilidad de los adaptadores |
 | HU-54 | Cobertura de pruebas bajo TDD y dobles para escenarios de falla externa |
 | T-01 | Desbloqueo de las dependencias institucionales externas (buzón y directorio) |
@@ -46,7 +47,7 @@ A medida que se implementen más historias, se añadirán más carpetas bajo `sr
 src/contexts/ingestion/
   domain/          value objects, entidades, políticas y puertos (in/out). No importa infraestructura.
   application/     el caso de uso. Orquesta puertos, no conoce IMAP ni MongoDB.
-  infrastructure/  configuración, planificador, normalización MIME (HU-02) y adaptadores: mongo/, imap/, memory/, resilience/ (retry + circuit breaker), normalization/ (puerto de HU-03).
+  infrastructure/  configuración, planificador, normalización MIME (HU-02), extracción de fecha/enlace (HU-08) y adaptadores: mongo/, imap/, memory/, resilience/ (retry + circuit breaker), normalization/ (puerto de HU-03).
 src/main.ts        raíz de composición: único lugar donde se eligen los adaptadores concretos.
 ```
 
@@ -90,7 +91,7 @@ cp .env.example .env
 npm install
 npm run typecheck            # TypeScript estricto
 npm run check:architecture   # RNF-41: el dominio no puede importar infraestructura
-npm test                     # 109 pruebas (requiere MongoDB corriendo)
+npm test                     # 120 pruebas (requiere MongoDB corriendo)
 npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 npm run build                # compila a dist/
 ```

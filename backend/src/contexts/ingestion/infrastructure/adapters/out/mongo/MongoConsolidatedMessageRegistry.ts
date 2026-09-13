@@ -3,6 +3,7 @@ import type {
   ConsolidatedMessageRecord,
   ConsolidatedMessageRegistryPort
 } from '../../../../domain/ports/out/ConsolidatedMessageRegistryPort.js';
+import type { DueDate } from '../../../../domain/value-objects/DueDate.js';
 
 interface ConsolidatedMessageDocument {
   _id: string;
@@ -12,6 +13,8 @@ interface ConsolidatedMessageDocument {
   firstSentAt: Date;
   lastSentAt: Date;
   resendCount: number;
+  dueDate: DueDate;
+  applicationLink: string | null;
 }
 
 function documentId(sender: string, subject: string, firstSentAt: Date): string {
@@ -25,7 +28,9 @@ function toRecord(doc: ConsolidatedMessageDocument): ConsolidatedMessageRecord {
     body: doc.body,
     firstSentAt: doc.firstSentAt,
     lastSentAt: doc.lastSentAt,
-    resendCount: doc.resendCount
+    resendCount: doc.resendCount,
+    dueDate: doc.dueDate,
+    applicationLink: doc.applicationLink
   };
 }
 
@@ -76,7 +81,9 @@ export class MongoConsolidatedMessageRegistry implements ConsolidatedMessageRegi
           body: record.body,
           firstSentAt: record.firstSentAt,
           lastSentAt: record.lastSentAt,
-          resendCount: record.resendCount
+          resendCount: record.resendCount,
+          dueDate: record.dueDate,
+          applicationLink: record.applicationLink
         }
       },
       { upsert: true }

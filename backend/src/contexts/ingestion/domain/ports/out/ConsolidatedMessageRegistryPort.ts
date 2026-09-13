@@ -1,3 +1,5 @@
+import type { DueDate } from '../../value-objects/DueDate.js';
+
 /**
  * Registro de mensajes consolidados por deduplicacion semantica (HU-03).
  *
@@ -16,6 +18,10 @@ export interface ConsolidatedMessageRecord {
   readonly lastSentAt: Date;
   /** Cantidad de reenvios detectados (no cuenta el envio original). */
   readonly resendCount: number;
+  /** HU-08: fecha de cierre interpretada del cuerpo vigente del grupo. */
+  readonly dueDate: DueDate;
+  /** HU-08, criterio 5: enlace de postulacion declarado en el mensaje. */
+  readonly applicationLink: string | null;
 }
 
 export interface ConsolidatedMessageRegistryPort {

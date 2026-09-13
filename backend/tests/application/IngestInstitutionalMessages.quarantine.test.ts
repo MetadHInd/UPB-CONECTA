@@ -10,6 +10,7 @@ import { InMemoryIngestionCursorRepository } from '../../src/contexts/ingestion/
 import { InMemoryIngestionRunLogRepository } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryIngestionRunLogRepository.js';
 import { FixedClock } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/SystemClock.js';
 import { MimeMessageNormalizerAdapter } from '../../src/contexts/ingestion/infrastructure/adapters/out/normalization/MimeMessageNormalizerAdapter.js';
+import { SpanishDueDateExtractor } from '../../src/contexts/ingestion/infrastructure/extraction/SpanishDueDateExtractor.js';
 import type { RawInstitutionalMessage } from '../../src/contexts/ingestion/domain/entities/RawInstitutionalMessage.js';
 import type { UntranslatableMessage } from '../../src/contexts/ingestion/domain/ports/out/MailboxIngestionPort.js';
 
@@ -66,6 +67,7 @@ function buildDependencies(overrides: { quarantineIncidentThresholdRatio?: numbe
       deduplicationWindowMs: DEDUPLICATION_WINDOW_MS,
       quarantineIncidentPolicy: new QuarantineIncidentPolicy(overrides.quarantineIncidentThresholdRatio ?? 0.5),
       normalizer: new MimeMessageNormalizerAdapter(),
+      dueDateExtractor: new SpanishDueDateExtractor(),
       clock,
       batchSize: 200
     }
