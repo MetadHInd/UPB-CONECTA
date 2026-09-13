@@ -42,7 +42,9 @@ describe('DeduplicationPolicy', () => {
       body: first.body,
       firstSentAt: first.sentAt,
       lastSentAt: first.sentAt,
-      resendCount: 0
+      resendCount: 0,
+      dueDate: { kind: 'sin-vencimiento' },
+      applicationLink: null
     });
 
     const resend = message('<b@upb.edu.co>', '2026-09-10T20:00:00Z'); // +12h
@@ -59,7 +61,9 @@ describe('DeduplicationPolicy', () => {
       body: first.body,
       firstSentAt: first.sentAt,
       lastSentAt: first.sentAt,
-      resendCount: 0
+      resendCount: 0,
+      dueDate: { kind: 'sin-vencimiento' },
+      applicationLink: null
     });
 
     const later = message('<c@upb.edu.co>', '2026-09-11T08:00:01Z'); // +24h y 1s
@@ -76,7 +80,9 @@ describe('DeduplicationPolicy', () => {
       body: first.body,
       firstSentAt: first.sentAt,
       lastSentAt: first.sentAt,
-      resendCount: 0
+      resendCount: 0,
+      dueDate: { kind: 'sin-vencimiento' },
+      applicationLink: null
     });
 
     const resend = message('<d@upb.edu.co>', '2026-09-10T10:00:00Z', { body: 'cuerpo actualizado' });
@@ -100,7 +106,9 @@ describe('DeduplicationPolicy', () => {
       body: first.body,
       firstSentAt: first.sentAt,
       lastSentAt: first.sentAt,
-      resendCount: 0
+      resendCount: 0,
+      dueDate: { kind: 'sin-vencimiento' },
+      applicationLink: null
     });
 
     const resend = message('<e@upb.edu.co>', new Date(first.sentAt.getTime() + offsetMs).toISOString());

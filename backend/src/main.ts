@@ -13,6 +13,7 @@ import { MongoIngestionRunLogRepository } from './contexts/ingestion/infrastruct
 import { InMemoryMailboxAdapter } from './contexts/ingestion/infrastructure/adapters/out/memory/InMemoryMailboxAdapter.js';
 import { SystemClock } from './contexts/ingestion/infrastructure/adapters/out/memory/SystemClock.js';
 import { MimeMessageNormalizerAdapter } from './contexts/ingestion/infrastructure/adapters/out/normalization/MimeMessageNormalizerAdapter.js';
+import { SpanishDueDateExtractor } from './contexts/ingestion/infrastructure/extraction/SpanishDueDateExtractor.js';
 import { buildFixtureMessages } from './contexts/ingestion/infrastructure/fixtures/institutionalMessages.js';
 
 /**
@@ -47,6 +48,7 @@ async function bootstrap(): Promise<void> {
     deduplicationWindowMs: config.deduplicationWindowMs,
     quarantineIncidentPolicy: new QuarantineIncidentPolicy(config.quarantineIncidentThresholdRatio),
     normalizer: new MimeMessageNormalizerAdapter(),
+    dueDateExtractor: new SpanishDueDateExtractor(),
     clock: new SystemClock(),
     batchSize: config.batchSize
   });

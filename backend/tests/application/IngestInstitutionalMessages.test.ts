@@ -14,6 +14,7 @@ import { InMemoryIngestionCursorRepository } from '../../src/contexts/ingestion/
 import { InMemoryIngestionRunLogRepository } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryIngestionRunLogRepository.js';
 import { FixedClock } from '../../src/contexts/ingestion/infrastructure/adapters/out/memory/SystemClock.js';
 import { MimeMessageNormalizerAdapter } from '../../src/contexts/ingestion/infrastructure/adapters/out/normalization/MimeMessageNormalizerAdapter.js';
+import { SpanishDueDateExtractor } from '../../src/contexts/ingestion/infrastructure/extraction/SpanishDueDateExtractor.js';
 import { buildFixtureMessages } from '../../src/contexts/ingestion/infrastructure/fixtures/institutionalMessages.js';
 
 const DEDUPLICATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 dias
@@ -36,6 +37,7 @@ function buildUseCase(overrides: { registry?: ProcessedMessageRegistryPort; dedu
     deduplication: new DeduplicationPolicy(consolidatedRegistry),
     deduplicationWindowMs: overrides.deduplicationWindowMs ?? DEDUPLICATION_WINDOW_MS,
     normalizer: new MimeMessageNormalizerAdapter(),
+    dueDateExtractor: new SpanishDueDateExtractor(),
     quarantine: new InMemoryQuarantineRepository(),
     quarantineIncidentPolicy: new QuarantineIncidentPolicy(1),
     clock,
@@ -132,6 +134,7 @@ describe('IngestInstitutionalMessages, CU-01', () => {
       deduplication: new DeduplicationPolicy(consolidatedRegistry),
       deduplicationWindowMs: DEDUPLICATION_WINDOW_MS,
       normalizer: new MimeMessageNormalizerAdapter(),
+      dueDateExtractor: new SpanishDueDateExtractor(),
       quarantine: new InMemoryQuarantineRepository(),
       quarantineIncidentPolicy: new QuarantineIncidentPolicy(1),
       clock: new FixedClock(new Date('2026-08-24T10:00:00Z')),
@@ -156,6 +159,7 @@ describe('IngestInstitutionalMessages, CU-01', () => {
       deduplication: new DeduplicationPolicy(consolidatedRegistry),
       deduplicationWindowMs: DEDUPLICATION_WINDOW_MS,
       normalizer: new MimeMessageNormalizerAdapter(),
+      dueDateExtractor: new SpanishDueDateExtractor(),
       quarantine: new InMemoryQuarantineRepository(),
       quarantineIncidentPolicy: new QuarantineIncidentPolicy(1),
       clock: new FixedClock(new Date('2026-08-24T10:00:00Z')),
@@ -182,6 +186,7 @@ describe('IngestInstitutionalMessages, CU-01', () => {
           deduplication: new DeduplicationPolicy(consolidatedRegistry),
           deduplicationWindowMs: DEDUPLICATION_WINDOW_MS,
           normalizer: new MimeMessageNormalizerAdapter(),
+          dueDateExtractor: new SpanishDueDateExtractor(),
           quarantine: new InMemoryQuarantineRepository(),
           quarantineIncidentPolicy: new QuarantineIncidentPolicy(1),
           clock: new FixedClock(new Date()),
@@ -259,6 +264,7 @@ cierre extendido al 27 de septiembre`
       deduplication: new DeduplicationPolicy(consolidatedRegistry),
       deduplicationWindowMs: DEDUPLICATION_WINDOW_MS,
       normalizer: new MimeMessageNormalizerAdapter(),
+      dueDateExtractor: new SpanishDueDateExtractor(),
       quarantine: new InMemoryQuarantineRepository(),
       quarantineIncidentPolicy: new QuarantineIncidentPolicy(1),
       clock: new FixedClock(new Date('2026-09-10T10:00:00Z')),
@@ -276,5 +282,52 @@ cierre extendido al 27 de septiembre`
     );
     expect(consolidado?.body).toContain('27 de septiembre');
     expect(consolidado?.resendCount).toBe(1);
+  });
+
+  it('HU-08: extrae la fecha de cierre y el enlace de postulacion a lo largo de todo el pipeline', async () => {
+    const { MessageId } = await import('../../src/contexts/ingestion/domain/value-objects/MessageId.js');
+    const raw: import('../../src/contexts/ingestion/domain/entities/RawInstitutionalMessage.js').RawInstitutionalMessage = {
+      messageId: MessageId.fromHeader('<conv-hu08@upb.edu.co>'),
+      mailboxUid: 301,
+      sender: 'practicas@upb.edu.co',
+      subject: 'Convocatoria practica empresarial',
+      receivedAt: new Date('2026-08-01T08:00:00Z'),
+      rawBody: `From: Coordinacion de Practicas <practicas@upb.edu.co>
+Subject: Convocatoria practica empresarial
+Content-Type: text/plain; charset=us-ascii
+
+Postulate antes del 20 de agosto de 2026 en https://upb.edu.co/practicas/postulacion.`
+    };
+
+    const mailbox = new InMemoryMailboxAdapter([raw]);
+    const registry = new InMemoryProcessedMessageRegistry();
+    const consolidatedRegistry = new InMemoryConsolidatedMessageRegistry();
+    const useCase = new IngestInstitutionalMessages({
+      mailbox,
+      registry,
+      consolidatedRegistry,
+      quarantine: new InMemoryQuarantineRepository(),
+      cursors: new InMemoryIngestionCursorRepository(),
+      logs: new InMemoryIngestionRunLogRepository(),
+      idempotency: new IdempotencyPolicy(registry),
+      deduplication: new DeduplicationPolicy(consolidatedRegistry),
+      deduplicationWindowMs: DEDUPLICATION_WINDOW_MS,
+      quarantineIncidentPolicy: new QuarantineIncidentPolicy(1),
+      normalizer: new MimeMessageNormalizerAdapter(),
+      dueDateExtractor: new SpanishDueDateExtractor(),
+      clock: new FixedClock(new Date('2026-08-01T08:00:00Z')),
+      batchSize: 200
+    });
+
+    await useCase.execute();
+
+    const consolidado = await consolidatedRegistry.findWithinWindow(
+      'practicas@upb.edu.co',
+      'Convocatoria practica empresarial',
+      new Date('2026-08-01T08:00:00Z'),
+      DEDUPLICATION_WINDOW_MS
+    );
+    expect(consolidado?.dueDate).toEqual({ kind: 'con-fecha', date: new Date('2026-08-20T05:00:00Z') });
+    expect(consolidado?.applicationLink).toBe('https://upb.edu.co/practicas/postulacion');
   });
 });

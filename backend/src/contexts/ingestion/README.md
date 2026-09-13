@@ -4,9 +4,10 @@
 
 Implementacion de **HU-01 (SCRUM-13): Conexion programada e idempotente al buzon institucional recolector**,
 **HU-02 (SCRUM-14): Extraccion de metadatos y normalizacion del cuerpo del mensaje**,
-**HU-03 (SCRUM-15): Deduplicacion por contenido dentro de ventana temporal configurable** y
-**HU-04 (SCRUM-16): Cuarentena de mensajes no procesables y bitacora de ingesta** (criterios 1-4; criterio 5 diferido, ver seccion propia).
-Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05, RF-06, RF-07. Caso de uso CU-01, pasos 1 a 5, flujo alternativo A, excepcion E2.
+**HU-03 (SCRUM-15): Deduplicacion por contenido dentro de ventana temporal configurable**,
+**HU-04 (SCRUM-16): Cuarentena de mensajes no procesables y bitacora de ingesta** (criterios 1-4; criterio 5 diferido, ver seccion propia) y
+**HU-08 (SCRUM-20): Extraccion de fecha de cierre y enlace de postulacion**.
+Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05, RF-06, RF-07, RF-11, RF-12, RNF-27. Caso de uso CU-01, pasos 1 a 6, flujo alternativo A, excepcion E2.
 
 ## Stack
 
@@ -25,7 +26,7 @@ TypeScript sobre Node.js, MongoDB como motor documental, Vitest para pruebas.
     npm install
     npm run typecheck            # TypeScript estricto
     npm run check:architecture   # regla de dependencia (RNF-41)
-    npm test                     # 109 pruebas (requiere MongoDB real corriendo, ver README raíz)
+    npm test                     # 120 pruebas (requiere MongoDB real corriendo, ver README raíz)
     npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 
 ## Criterios de aceptacion y donde se verifican
@@ -126,6 +127,37 @@ mecanismo de reprocesamiento exista.
 | 4. Una proporción de cuarentena que supera el umbral marca el incidente para revisión prioritaria | `QuarantineIncidentPolicy.test.ts`, `IngestInstitutionalMessages.quarantine.test.ts` |
 | 5. Reprocesar un mensaje corregido sin reingesta completa | **Diferido** — necesita un punto de entrada HTTP que no existe todavía |
 | Definición de terminado: mensaje malformado en mitad del lote, los posteriores se procesan | `IngestInstitutionalMessages.quarantine.test.ts` |
+
+## HU-08 — Extracción de fecha de cierre y enlace de postulación (RF-11, RF-12, RNF-27, CU-01 paso 6)
+
+Interpreta la fecha límite y el enlace de postulación sobre el `body` ya normalizado por HU-02. `DueDate`
+(dominio) es una unión discriminada con tres estados explícitos —`con-fecha`, `sin-vencimiento`, `ambigua`—
+en vez de `Date | null`: un `null` no distingue "no hay plazo" de "no se pudo interpretar la fecha", y esa
+distinción es la que le permite al estudiante confiar en el dato o saber que debe verificarlo.
+
+`SpanishDueDateExtractor` (`infrastructure/extraction/`) vive en infraestructura por el mismo motivo que el
+normalizador MIME de HU-02: es interpretación de lenguaje natural sobre texto, no una regla de negocio.
+**Sin dependencias nuevas** (regex + `Date` nativo), decisión consistente con HU-02. Reconoce fechas numéricas
+(`dd/mm/aaaa`) y textuales en español (`"el 12 de septiembre"`, con o sin año, con o sin día de la semana);
+cuando hay varias fechas en el cuerpo, ancla la de cierre a palabras clave que la preceden (`cierre`, `hasta`,
+`plazo`, `vence`, `límite`) para distinguirla de otras menciones (p. ej. la fecha de un evento). Si ninguna o
+más de una fecha queda igualmente anclada, el resultado es `ambigua` en vez de adivinar. El año ausente se
+infiere del año de envío del mensaje, saltando al año siguiente si la fecha resultante ya pasó. Las fechas
+se representan en UTC como medianoche de Colombia (UTC-05:00).
+
+Se invoca en `IngestInstitutionalMessages.consolidate()`, junto a la deduplicación de HU-03: el resultado se
+guarda en el mismo `ConsolidatedMessageRecord` (`dueDate`, `applicationLink`). En un reenvío con el mismo
+cuerpo se conserva la extracción original (evita que la inferencia de año, que depende de la fecha de envío,
+"derive" entre reenvíos); si el cuerpo cambió (criterio 5 de HU-03), se reinterpreta desde cero.
+
+| Criterio | Prueba |
+|---|---|
+| 1. Fecha declarada se extrae en ISO 8601, zona horaria de Colombia | `SpanishDueDateExtractor.test.ts` |
+| 2. Sin plazo declarado, se marca explícitamente "sin vencimiento" | `SpanishDueDateExtractor.test.ts` |
+| 3. Fechas en lenguaje natural en español (con/sin año, con día de la semana) | `SpanishDueDateExtractor.test.ts` |
+| 4. Entre fecha de evento y fecha de cierre, se selecciona la de cierre; contradicción → ambigua | `SpanishDueDateExtractor.test.ts` |
+| 5. Enlace de postulación identificado y almacenado | `SpanishDueDateExtractor.test.ts`, `IngestInstitutionalMessages.test.ts` |
+| Definición de terminado: ≥95% de acierto sobre un corpus etiquetado | `SpanishDueDateExtractor.accuracy.test.ts` (20 mensajes, 100% en la última corrida) |
 
 ## HU-53 — Verificación del aislamiento del dominio (RNF-41, RNF-42)
 

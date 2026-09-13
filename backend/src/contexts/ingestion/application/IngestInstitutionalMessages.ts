@@ -13,6 +13,7 @@ import type { IngestionRunLogRepositoryPort } from '../domain/ports/out/Ingestio
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
 import type { IngestInstitutionalMessagesPort } from '../domain/ports/in/IngestInstitutionalMessagesPort.js';
 import type { MessageNormalizerPort } from '../domain/ports/out/MessageNormalizerPort.js';
+import type { DueDateExtractorPort } from '../domain/ports/out/DueDateExtractorPort.js';
 
 export interface IngestInstitutionalMessagesDependencies {
   readonly mailbox: MailboxIngestionPort;
@@ -26,6 +27,7 @@ export interface IngestInstitutionalMessagesDependencies {
   readonly deduplicationWindowMs: number;
   readonly quarantineIncidentPolicy: QuarantineIncidentPolicy;
   readonly normalizer: MessageNormalizerPort;
+  readonly dueDateExtractor: DueDateExtractorPort;
   readonly clock: ClockPort;
   readonly batchSize: number;
 }
@@ -126,9 +128,13 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
    * documento nuevo, se consolida en el existente, o se actualiza su cuerpo.
    */
   private async consolidate(message: RawInstitutionalMessage): Promise<void> {
-    const { normalizer, deduplication, deduplicationWindowMs, consolidatedRegistry } = this.deps;
+    const { normalizer, deduplication, deduplicationWindowMs, consolidatedRegistry, dueDateExtractor } = this.deps;
     const normalized = normalizer.normalize(message);
     const decision = await deduplication.decide(normalized, deduplicationWindowMs);
+    // HU-08: se interpreta siempre sobre el cuerpo del mensaje entrante, no
+    // sobre el del grupo existente — un reenvio puede traer una fecha
+    // corregida o el enlace de postulacion que el aviso original omitio.
+    const { dueDate, applicationLink } = dueDateExtractor.extract(normalized);
 
     if (decision.kind === 'new') {
       await consolidatedRegistry.save({
@@ -137,7 +143,9 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
         body: normalized.body,
         firstSentAt: normalized.sentAt,
         lastSentAt: normalized.sentAt,
-        resendCount: 0
+        resendCount: 0,
+        dueDate,
+        applicationLink
       });
       return;
     }
@@ -149,7 +157,9 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
       body: decision.kind === 'update-body' ? normalized.body : existing.body,
       firstSentAt: existing.firstSentAt,
       lastSentAt: normalized.sentAt,
-      resendCount: existing.resendCount + 1
+      resendCount: existing.resendCount + 1,
+      dueDate: decision.kind === 'update-body' ? dueDate : existing.dueDate,
+      applicationLink: decision.kind === 'update-body' ? applicationLink : existing.applicationLink
     });
   }
 
