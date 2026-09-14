@@ -20,9 +20,9 @@ UPB Conecta ataca específicamente ese vacío: agregación, segmentación y opor
 
 ## Estado actual del código
 
-Este proyecto (backend, subcarpeta `backend/` del repositorio) implementa, por ahora, diez historias entre el Sprint 1 y el Sprint 2: **HU-01 (SCRUM-13)** — conexión programada e idempotente al buzón institucional recolector, el primer eslabón del pipeline de ingesta (EP-01), base de todo lo demás: sin ingesta no hay clasificación, sin clasificación no hay feed, sin feed no hay notificaciones — junto con **HU-02** (extracción de metadatos y normalización del cuerpo), **HU-03** (deduplicación por contenido en ventana temporal), **HU-04** (cuarentena de mensajes no procesables y bitácora, criterios 1-4), **HU-05** (resiliencia del buzón), **HU-08** (extracción de fecha de cierre y enlace de postulación), **HU-18** (registro y ciclo de vida de dispositivos, criterios 1-5), **HU-38** (preferencias de notificación, criterios 1/2/3/5/6), **HU-44** (consentimiento informado, criterios 2/4/5/6) y **HU-53** (verificación automatizada de la arquitectura).
+Este proyecto (backend, subcarpeta `backend/` del repositorio) implementa, por ahora, once historias entre el Sprint 1 y el Sprint 2: **HU-01 (SCRUM-13)** — conexión programada e idempotente al buzón institucional recolector, el primer eslabón del pipeline de ingesta (EP-01), base de todo lo demás: sin ingesta no hay clasificación, sin clasificación no hay feed, sin feed no hay notificaciones — junto con **HU-02** (extracción de metadatos y normalización del cuerpo), **HU-03** (deduplicación por contenido en ventana temporal), **HU-04** (cuarentena de mensajes no procesables y bitácora, criterios 1-4), **HU-05** (resiliencia del buzón), **HU-08** (extracción de fecha de cierre y enlace de postulación), **HU-18** (registro y ciclo de vida de dispositivos, criterios 1-5), **HU-38** (preferencias de notificación, criterios 1/2/3/5/6), **HU-44** (consentimiento informado, criterios 2/4/5/6), **HU-53** (verificación automatizada de la arquitectura) y **HU-55** (rendimiento y resiliencia, criterios 3-4 parciales).
 
-El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificación de Requerimientos y el Product Backlog del proyecto) vive en Jira. Los sprints activos agrupan, además de estas diez, las historias que comparten su mismo riesgo técnico — ingesta, deduplicación, clasificación temprana y arquitectura verificable:
+El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificación de Requerimientos y el Product Backlog del proyecto) vive en Jira. Los sprints activos agrupan, además de estas once, las historias que comparten su mismo riesgo técnico — ingesta, deduplicación, clasificación temprana y arquitectura verificable:
 
 | Historia | Qué cubre |
 |---|---|
@@ -37,6 +37,7 @@ El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificació
 | HU-44 *(implementada aquí, criterios 2/4/5/6)* | Consentimiento informado de tratamiento de datos con registro versionado |
 | HU-53 *(implementada aquí)* | Aislamiento del dominio verificable y sustituibilidad de los adaptadores |
 | HU-54 | Cobertura de pruebas bajo TDD y dobles para escenarios de falla externa |
+| HU-55 *(implementada aquí, criterios 3-4)* | Rendimiento bajo carga (parcial) y degradación controlada ante fallos |
 | T-01 | Desbloqueo de las dependencias institucionales externas (buzón y directorio) |
 | T-02 | Modelo de datos documental, repositorios e índices base |
 
@@ -102,7 +103,7 @@ cp .env.example .env
 npm install
 npm run typecheck            # TypeScript estricto
 npm run check:architecture   # RNF-41: el dominio no puede importar infraestructura
-npm test                     # 157 pruebas (requiere MongoDB corriendo)
+npm test                     # 159 pruebas (requiere MongoDB corriendo)
 npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 npm run build                # compila a dist/
 ```

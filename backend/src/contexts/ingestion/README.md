@@ -5,9 +5,10 @@
 Implementacion de **HU-01 (SCRUM-13): Conexion programada e idempotente al buzon institucional recolector**,
 **HU-02 (SCRUM-14): Extraccion de metadatos y normalizacion del cuerpo del mensaje**,
 **HU-03 (SCRUM-15): Deduplicacion por contenido dentro de ventana temporal configurable**,
-**HU-04 (SCRUM-16): Cuarentena de mensajes no procesables y bitacora de ingesta** (criterios 1-4; criterio 5 diferido, ver seccion propia) y
-**HU-08 (SCRUM-20): Extraccion de fecha de cierre y enlace de postulacion**.
-Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05, RF-06, RF-07, RF-11, RF-12, RNF-27. Caso de uso CU-01, pasos 1 a 6, flujo alternativo A, excepcion E2.
+**HU-04 (SCRUM-16): Cuarentena de mensajes no procesables y bitacora de ingesta** (criterios 1-4; criterio 5 diferido, ver seccion propia),
+**HU-08 (SCRUM-20): Extraccion de fecha de cierre y enlace de postulacion** y
+**HU-55 (SCRUM-67): Rendimiento bajo carga y degradacion controlada** (criterios 3 y 4, parciales; el resto diferido, ver seccion propia).
+Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05, RF-06, RF-07, RF-11, RF-12, RNF-01 a RNF-12, RNF-27, RNF-40. Caso de uso CU-01, pasos 1 a 6, flujo alternativo A, excepcion E2.
 
 ## Stack
 
@@ -26,7 +27,7 @@ TypeScript sobre Node.js, MongoDB como motor documental, Vitest para pruebas.
     npm install
     npm run typecheck            # TypeScript estricto
     npm run check:architecture   # regla de dependencia (RNF-41)
-    npm test                     # 120 pruebas (requiere MongoDB real corriendo, ver README raíz)
+    npm test                     # 122 pruebas (requiere MongoDB real corriendo, ver README raíz)
     npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 
 ## Criterios de aceptacion y donde se verifican
@@ -158,6 +159,33 @@ cuerpo se conserva la extracción original (evita que la inferencia de año, que
 | 4. Entre fecha de evento y fecha de cierre, se selecciona la de cierre; contradicción → ambigua | `SpanishDueDateExtractor.test.ts` |
 | 5. Enlace de postulación identificado y almacenado | `SpanishDueDateExtractor.test.ts`, `IngestInstitutionalMessages.test.ts` |
 | Definición de terminado: ≥95% de acierto sobre un corpus etiquetado | `SpanishDueDateExtractor.accuracy.test.ts` (20 mensajes, 100% en la última corrida) |
+
+## HU-55 — Rendimiento bajo carga y degradación controlada (RNF-01 a RNF-12, RNF-40) — **parcial**
+
+Historia de verificación transversal (300 sesiones concurrentes, 3.000 usuarios, feed/foro/mapa con
+disponibilidad ≥99%, etc.) que en su mayoría depende de subsistemas que todavía no existen en este backend
+(feed, foro, mapa, notificaciones, capa HTTP). Solo se implementan los dos criterios verificables contra lo
+que sí existe hoy — el pipeline de ingesta:
+
+- **Criterio 3 (parcial) — "se ingiere, normaliza y clasifica en menos de 5 minutos"**: la
+  *clasificación* (HU-06 en adelante) no existe todavía, así que se mide lo que sí existe del pipeline:
+  ingesta + idempotencia (HU-01) + normalización (HU-02) + deduplicación (HU-03) + cuarentena (HU-04) +
+  extracción de fecha/enlace (HU-08), sobre un lote sintético de 200 mensajes (`syntheticMessages.ts`,
+  reproducible: mismo `count` siempre genera los mismos mensajes) contra **MongoDB real, no mocks** — el
+  cuello de botella más realista dado que no hay buzón IMAP real todavía. En la última corrida local: ~1.1s
+  para 200 mensajes, muy por debajo del presupuesto de 5 minutos.
+- **Criterio 4 (parcial) — "la aplicación sigue sirviendo el contenido ya almacenado" ante la caída del
+  buzón**: no existe ninguna capa que sirva contenido (sin feed, sin HTTP), así que el proxy verificable es
+  que una caída del buzón durante un ciclo no borre ni corrompa lo consolidado en ejecuciones anteriores —
+  exactamente lo que una futura capa de feed tendría que leer.
+- **Diferidos** (criterios 1, 2, 5, 6, 7): requieren feed, foro, mapa, notificaciones y una capa HTTP con
+  carga real de 300 sesiones concurrentes — ninguno existe todavía en este backend.
+
+| Criterio | Estado | Prueba |
+|---|---|---|
+| 3 (parcial: sin el paso de clasificación) | Cubierto | `tests/performance/IngestionThroughput.test.ts` (contra MongoDB real) |
+| 4 (parcial: proxy de persistencia, no de una capa de feed) | Cubierto | `IngestInstitutionalMessages.resilience.test.ts` |
+| 1, 2, 5, 6, 7 | Diferidos | Requieren feed/foro/mapa/notificaciones/HTTP |
 
 ## HU-53 — Verificación del aislamiento del dominio (RNF-41, RNF-42)
 
