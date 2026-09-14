@@ -2,17 +2,7 @@ import type {
   ConsolidatedMessageRecord,
   ConsolidatedMessageRegistryPort
 } from '../../../../domain/ports/out/ConsolidatedMessageRegistryPort.js';
-
-/**
- * Identidad de un grupo consolidado: remitente+asunto NO basta, porque dos
- * convocatorias con el mismo asunto separadas en el tiempo (fuera de
- * ventana, criterio 3) deben ser grupos distintos, no el mismo documento
- * sobrescrito. `firstSentAt` fija el grupo porque nunca cambia una vez
- * creado.
- */
-function groupKey(sender: string, subject: string, firstSentAt: Date): string {
-  return `${sender} ${subject} ${firstSentAt.getTime()}`;
-}
+import { convocatoriaIdToString, type ConvocatoriaId } from '../../../../domain/value-objects/ConvocatoriaId.js';
 
 export class InMemoryConsolidatedMessageRegistry implements ConsolidatedMessageRegistryPort {
   private readonly groups = new Map<string, ConsolidatedMessageRecord>();
@@ -31,8 +21,12 @@ export class InMemoryConsolidatedMessageRegistry implements ConsolidatedMessageR
     return null;
   }
 
+  async findById(id: ConvocatoriaId): Promise<ConsolidatedMessageRecord | null> {
+    return this.groups.get(convocatoriaIdToString(id)) ?? null;
+  }
+
   async save(record: ConsolidatedMessageRecord): Promise<void> {
-    this.groups.set(groupKey(record.sender, record.subject, record.firstSentAt), record);
+    this.groups.set(convocatoriaIdToString(record), record);
   }
 
   get size(): number {

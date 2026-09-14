@@ -29,6 +29,6 @@ Ver el README de cada subcarpeta para arquitectura, cómo levantar el entorno y 
 
 ## Estado actual
 
-- **Backend:** HU-01, HU-02, HU-03, HU-04 (criterios 1-4), HU-05, HU-08, HU-18 (criterios 1-5), HU-21 (criterios 1/2/3/6), HU-38 (criterios 1/2/3/5/6), HU-44 (criterios 2/4/5/6), HU-53 y HU-55 (criterios 3-4) implementadas, 173/173 pruebas en verde, CI con `main` protegida (PR obligatorio).
+- **Backend:** HU-01, HU-02, HU-03, HU-04 (criterios 1-4), HU-05, HU-08, HU-15 (criterios 1-4), HU-18 (criterios 1-5), HU-21 (criterios 1/2/3/6), HU-38 (criterios 1/2/3/5/6), HU-44 (criterios 2/4/5/6), HU-53 y HU-55 (criterios 3-4) implementadas, 187/187 pruebas en verde, CI con `main` protegida (PR obligatorio).
 - **Frontend:** UI preliminar completa (splash, inicio, noticias, foro, mapa esquemático, chatbot, perfil) sobre datos mock; sin conexión real al backend todavía.
 - El resto del backlog (11 épicas, 51 historias restantes) vive en Jira sin código asociado.

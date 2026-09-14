@@ -1,4 +1,5 @@
 import type { DueDate } from '../../value-objects/DueDate.js';
+import type { ConvocatoriaId } from '../../value-objects/ConvocatoriaId.js';
 
 /**
  * Registro de mensajes consolidados por deduplicacion semantica (HU-03).
@@ -36,6 +37,9 @@ export interface ConsolidatedMessageRegistryPort {
     referenceDate: Date,
     windowMs: number
   ): Promise<ConsolidatedMessageRecord | null>;
+
+  /** HU-15: busqueda directa por identidad estable, para la vista de detalle. */
+  findById(id: ConvocatoriaId): Promise<ConsolidatedMessageRecord | null>;
 
   save(record: ConsolidatedMessageRecord): Promise<void>;
 }

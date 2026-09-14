@@ -114,6 +114,28 @@ describe('MongoConsolidatedMessageRegistry (integración contra MongoDB real)', 
     expect(count).toBe(2);
   });
 
+  it('HU-15: findById recupera el grupo por identidad estable, sin depender de la ventana', async () => {
+    const original = record();
+    await registry.save(original);
+
+    const found = await registry.findById({
+      sender: original.sender,
+      subject: original.subject,
+      firstSentAt: original.firstSentAt
+    });
+
+    expect(found?.body).toBe(original.body);
+  });
+
+  it('findById devuelve null para una identidad que no existe', async () => {
+    const found = await registry.findById({
+      sender: 'nadie@upb.edu.co',
+      subject: 'no existe',
+      firstSentAt: new Date('2026-01-01T00:00:00Z')
+    });
+    expect(found).toBeNull();
+  });
+
   it('crea el indice por remitente y asunto declarado por el adaptador', async () => {
     const indexes = await db.collection(COLLECTION).indexes();
     expect(indexes.some((index) => index.name === 'idx_sender_subject')).toBe(true);
