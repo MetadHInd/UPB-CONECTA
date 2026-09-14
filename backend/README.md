@@ -20,9 +20,9 @@ UPB Conecta ataca específicamente ese vacío: agregación, segmentación y opor
 
 ## Estado actual del código
 
-Este proyecto (backend, subcarpeta `backend/` del repositorio) implementa, por ahora, trece historias entre el Sprint 1 y el Sprint 2: **HU-01 (SCRUM-13)** — conexión programada e idempotente al buzón institucional recolector, el primer eslabón del pipeline de ingesta (EP-01), base de todo lo demás: sin ingesta no hay clasificación, sin clasificación no hay feed, sin feed no hay notificaciones — junto con **HU-02** (extracción de metadatos y normalización del cuerpo), **HU-03** (deduplicación por contenido en ventana temporal), **HU-04** (cuarentena de mensajes no procesables y bitácora, criterios 1-4), **HU-05** (resiliencia del buzón), **HU-08** (extracción de fecha de cierre y enlace de postulación), **HU-15** (vista de detalle de la convocatoria, criterios 1-4), **HU-18** (registro y ciclo de vida de dispositivos, criterios 1-5), **HU-21** (agrupación de avisos y límite diario, criterios 1/2/3/6), **HU-38** (preferencias de notificación, criterios 1/2/3/5/6), **HU-44** (consentimiento informado, criterios 2/4/5/6), **HU-53** (verificación automatizada de la arquitectura) y **HU-55** (rendimiento y resiliencia, criterios 3-4 parciales).
+Este proyecto (backend, subcarpeta `backend/` del repositorio) implementa, por ahora, catorce historias entre el Sprint 1 y el Sprint 2: **HU-01 (SCRUM-13)** — conexión programada e idempotente al buzón institucional recolector, el primer eslabón del pipeline de ingesta (EP-01), base de todo lo demás: sin ingesta no hay clasificación, sin clasificación no hay feed, sin feed no hay notificaciones — junto con **HU-02** (extracción de metadatos y normalización del cuerpo), **HU-03** (deduplicación por contenido en ventana temporal), **HU-04** (cuarentena de mensajes no procesables y bitácora, criterios 1-4), **HU-05** (resiliencia del buzón), **HU-08** (extracción de fecha de cierre y enlace de postulación), **HU-15** (vista de detalle de la convocatoria, criterios 1-4), **HU-16** (marcado de estado personal, criterios 1/2/3/5), **HU-18** (registro y ciclo de vida de dispositivos, criterios 1-5), **HU-21** (agrupación de avisos y límite diario, criterios 1/2/3/6), **HU-38** (preferencias de notificación, criterios 1/2/3/5/6), **HU-44** (consentimiento informado, criterios 2/4/5/6), **HU-53** (verificación automatizada de la arquitectura) y **HU-55** (rendimiento y resiliencia, criterios 3-4 parciales).
 
-El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificación de Requerimientos y el Product Backlog del proyecto) vive en Jira. Los sprints activos agrupan, además de estas trece, las historias que comparten su mismo riesgo técnico — ingesta, deduplicación, clasificación temprana y arquitectura verificable:
+El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificación de Requerimientos y el Product Backlog del proyecto) vive en Jira. Los sprints activos agrupan, además de estas catorce, las historias que comparten su mismo riesgo técnico — ingesta, deduplicación, clasificación temprana y arquitectura verificable:
 
 | Historia | Qué cubre |
 |---|---|
@@ -33,6 +33,7 @@ El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificació
 | HU-05 *(implementada aquí)* | Reintento con espera exponencial y circuit breaker ante indisponibilidad del buzón |
 | HU-08 *(implementada aquí)* | Extracción de fecha de cierre y enlace de postulación |
 | HU-15 *(implementada aquí, criterios 1-4)* | Vista de detalle de la convocatoria con acceso al canal de postulación |
+| HU-16 *(implementada aquí, criterios 1/2/3/5)* | Marcado de estado personal y sección separada de eventos de interés general |
 | HU-18 *(implementada aquí, criterios 1-5)* | Registro y ciclo de vida del dispositivo para entrega de notificaciones |
 | HU-21 *(implementada aquí, criterios 1/2/3/6)* | Agrupación de avisos, límite diario y apertura directa al detalle |
 | HU-38 *(implementada aquí, criterios 1/2/3/5/6)* | Preferencias de notificación por categoría, anticipación y tema visual |
@@ -43,7 +44,7 @@ El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificació
 | T-01 | Desbloqueo de las dependencias institucionales externas (buzón y directorio) |
 | T-02 | Modelo de datos documental, repositorios e índices base |
 
-`src/contexts/consent/` y `src/contexts/notifications/` son los contextos fuera de `ingestion` — mismo patrón hexagonal, ver el README propio de cada uno. A medida que se implementen más historias, se añadirán más carpetas bajo `src/contexts/` (por ejemplo `classification`, `feed`, `moderation`).
+`src/contexts/consent/`, `src/contexts/notifications/` y `src/contexts/personalization/` son los contextos fuera de `ingestion` — mismo patrón hexagonal, ver el README propio de cada uno. A medida que se implementen más historias, se añadirán más carpetas bajo `src/contexts/` (por ejemplo `classification`, `feed`, `moderation`).
 
 ## Arquitectura
 
@@ -61,6 +62,10 @@ src/contexts/consent/
 src/contexts/notifications/
   domain/          DeviceRegistration, NotificationPreferences, puertos (in/out).
   application/     RegisterDevice, InvalidateDevice, ListActiveDevices, UpdateNotificationPreferences, GetNotificationPreferences.
+  infrastructure/  adaptadores en memoria y MongoDB, reloj.
+src/contexts/personalization/
+  domain/          ConvocatoriaPersonalState, puertos (in/out).
+  application/     UpdatePersonalState, GetPersonalState, ListSavedConvocatorias, ListArchivedConvocatorias.
   infrastructure/  adaptadores en memoria y MongoDB, reloj.
 src/main.ts        raíz de composición del scheduler de ingesta: único lugar donde se eligen los adaptadores concretos de ese contexto.
 ```
@@ -105,7 +110,7 @@ cp .env.example .env
 npm install
 npm run typecheck            # TypeScript estricto
 npm run check:architecture   # RNF-41: el dominio no puede importar infraestructura
-npm test                     # 187 pruebas (requiere MongoDB corriendo)
+npm test                     # 202 pruebas (requiere MongoDB corriendo)
 npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 npm run build                # compila a dist/
 ```
