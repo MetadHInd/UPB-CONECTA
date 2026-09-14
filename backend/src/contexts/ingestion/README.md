@@ -6,9 +6,10 @@ Implementacion de **HU-01 (SCRUM-13): Conexion programada e idempotente al buzon
 **HU-02 (SCRUM-14): Extraccion de metadatos y normalizacion del cuerpo del mensaje**,
 **HU-03 (SCRUM-15): Deduplicacion por contenido dentro de ventana temporal configurable**,
 **HU-04 (SCRUM-16): Cuarentena de mensajes no procesables y bitacora de ingesta** (criterios 1-4; criterio 5 diferido, ver seccion propia),
-**HU-08 (SCRUM-20): Extraccion de fecha de cierre y enlace de postulacion** y
-**HU-55 (SCRUM-67): Rendimiento bajo carga y degradacion controlada** (criterios 3 y 4, parciales; el resto diferido, ver seccion propia).
-Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05, RF-06, RF-07, RF-11, RF-12, RNF-01 a RNF-12, RNF-27, RNF-40. Caso de uso CU-01, pasos 1 a 6, flujo alternativo A, excepcion E2.
+**HU-08 (SCRUM-20): Extraccion de fecha de cierre y enlace de postulacion**,
+**HU-55 (SCRUM-67): Rendimiento bajo carga y degradacion controlada** (criterios 3 y 4, parciales; el resto diferido, ver seccion propia) y
+**HU-15 (SCRUM-27): Vista de detalle de la convocatoria** (criterios 1-4; criterio 5 diferido, depende de HU-24).
+Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05, RF-06, RF-07, RF-11, RF-12, RF-22, RF-42, RNF-01 a RNF-12, RNF-27, RNF-40. Caso de uso CU-01, pasos 1 a 6, flujo alternativo A, excepcion E2. CU-02 paso 7.
 
 ## Stack
 
@@ -27,7 +28,7 @@ TypeScript sobre Node.js, MongoDB como motor documental, Vitest para pruebas.
     npm install
     npm run typecheck            # TypeScript estricto
     npm run check:architecture   # regla de dependencia (RNF-41)
-    npm test                     # 122 pruebas (requiere MongoDB real corriendo, ver README raíz)
+    npm test                     # 187 pruebas (requiere MongoDB real corriendo, ver README raíz)
     npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 
 ## Criterios de aceptacion y donde se verifican
@@ -186,6 +187,41 @@ que sí existe hoy — el pipeline de ingesta:
 | 3 (parcial: sin el paso de clasificación) | Cubierto | `tests/performance/IngestionThroughput.test.ts` (contra MongoDB real) |
 | 4 (parcial: proxy de persistencia, no de una capa de feed) | Cubierto | `IngestInstitutionalMessages.resilience.test.ts` |
 | 1, 2, 5, 6, 7 | Diferidos | Requieren feed/foro/mapa/notificaciones/HTTP |
+
+## HU-15 — Vista de detalle de la convocatoria (RF-22, RF-42, CU-02 paso 7) — **parcial**
+
+"El detalle consume la misma entidad de dominio que el feed" (diseño de la historia en Jira): en vez de
+inventar una entidad `Convocatoria` nueva, `GetConvocatoriaDetail` lee directamente el
+`ConsolidatedMessageRecord` que ya produce el pipeline de ingesta (HU-01 a HU-08) — cuerpo, fecha de cierre
+(HU-08) y enlace de postulación (HU-08) ya estaban ahí, solo faltaba una forma de pedir "el detalle de esta
+convocatoria" en vez de solo "lo consolidado dentro de esta ventana temporal".
+
+- **`ConvocatoriaId`** (dominio): identificador estable (remitente + asunto + fecha del primer envío) que
+  formaliza la clave que los adaptadores de `ConsolidatedMessageRegistryPort` ya usaban internamente como
+  `_id`/clave de mapa — se extrajo a una función compartida (`convocatoriaIdToString`) para no duplicar esa
+  lógica en cada adaptador.
+- **`ConsolidatedMessageRegistryPort.findById`**: búsqueda directa por identidad, complementaria a
+  `findWithinWindow` (que busca "el grupo vigente dentro de una ventana", no "este grupo por su id").
+- **`evaluateConvocatoriaStatus`** (dominio, criterio 4): traduce `DueDate` (HU-08) a un estado explícito —
+  `vigente`, `vencida`, `sin-vencimiento` o `fecha-ambigua`. Una fecha ambigua no se fuerza a "vigente" ni a
+  "sin vencimiento": es su propio estado, para no ocultarle al estudiante que la fecha no se pudo interpretar
+  con certeza.
+- **`GetConvocatoriaDetail`** (aplicación): arma la vista completa (criterio 1), incluyendo la extracción del
+  dominio del enlace de postulación (`applicationDomain`, vía `URL.hostname`) para que el cliente lo muestre
+  antes de abrir el navegador (criterio 3 — "un enlace externo nunca se abre sin exponer el destino al
+  usuario", consistente con la Política de Seguridad). La ausencia de enlace es `null` explícito, no un campo
+  vacío (criterio 2).
+
+**Diferido:** criterio 5 (acceso directo al mapa cuando la convocatoria declara un lugar del campus) — el
+propio ticket lo marca como dependiente de HU-24 (catálogo de espacios), que no existe todavía.
+
+| Criterio | Estado | Prueba |
+|---|---|---|
+| 1. Contenido completo, fecha de cierre, remitente y enlace | Cubierto | `GetConvocatoriaDetail.test.ts` |
+| 2. Sin enlace, la ausencia se comunica de forma explícita | Cubierto | `GetConvocatoriaDetail.test.ts` |
+| 3. Dominio de destino expuesto antes de abrir el enlace | Cubierto (extracción del dominio; abrir el navegador es del cliente) | `GetConvocatoriaDetail.test.ts` |
+| 4. Estado de vencida indicado de forma inequívoca | Cubierto | `ConvocatoriaStatusPolicy.test.ts`, `GetConvocatoriaDetail.test.ts` |
+| 5. Acceso directo al mapa | Diferido | Depende de HU-24 (catálogo de espacios), no implementada |
 
 ## HU-53 — Verificación del aislamiento del dominio (RNF-41, RNF-42)
 

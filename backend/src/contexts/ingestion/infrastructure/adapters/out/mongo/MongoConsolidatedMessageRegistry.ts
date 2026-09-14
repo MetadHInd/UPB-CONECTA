@@ -4,6 +4,7 @@ import type {
   ConsolidatedMessageRegistryPort
 } from '../../../../domain/ports/out/ConsolidatedMessageRegistryPort.js';
 import type { DueDate } from '../../../../domain/value-objects/DueDate.js';
+import { convocatoriaIdToString, type ConvocatoriaId } from '../../../../domain/value-objects/ConvocatoriaId.js';
 
 interface ConsolidatedMessageDocument {
   _id: string;
@@ -15,10 +16,6 @@ interface ConsolidatedMessageDocument {
   resendCount: number;
   dueDate: DueDate;
   applicationLink: string | null;
-}
-
-function documentId(sender: string, subject: string, firstSentAt: Date): string {
-  return `${sender}|${subject}|${firstSentAt.getTime()}`;
 }
 
 function toRecord(doc: ConsolidatedMessageDocument): ConsolidatedMessageRecord {
@@ -70,8 +67,13 @@ export class MongoConsolidatedMessageRegistry implements ConsolidatedMessageRegi
     return null;
   }
 
+  async findById(id: ConvocatoriaId): Promise<ConsolidatedMessageRecord | null> {
+    const found = await this.collection.findOne({ _id: convocatoriaIdToString(id) });
+    return found ? toRecord(found) : null;
+  }
+
   async save(record: ConsolidatedMessageRecord): Promise<void> {
-    const _id = documentId(record.sender, record.subject, record.firstSentAt);
+    const _id = convocatoriaIdToString(record);
     await this.collection.updateOne(
       { _id },
       {
