@@ -329,21 +329,6 @@ Historia HU-54. Resumen de lo realizado y decisiones tomadas:
   `IdempotencyPolicy`.
 - `tests/infrastructure/resilience/*` — reintento con backoff y circuito.
 
-### Cómo ejecutar las verificaciones localmente (sin Mongo)
-
-Las pruebas de integración contra Mongo requieren una instancia real. Para
-ejecutar únicamente las pruebas unitarias de dominio y casos de uso sin Mongo,
-se puede omitir la verificación global usando la variable de entorno
-`SKIP_MONGO_GLOBAL_SETUP=1`. Ejemplo:
-
-```bash
-SKIP_MONGO_GLOBAL_SETUP=1 npm test
-SKIP_MONGO_GLOBAL_SETUP=1 npm run test:coverage
-```
-
-Esta bandera hace que el `globalSetup` de Vitest omita la comprobación de
-conectividad con MongoDB, permitiendo ejecutar los tests rápidos en memoria.
-
 ## Nota sobre los criterios 4 y 5 (clasificación y moderación)
 
 Los criterios relativos al "servicio de clasificación" y al "servicio de
