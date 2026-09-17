@@ -14,6 +14,9 @@ import type { ClockPort } from '../domain/ports/out/ClockPort.js';
 import type { IngestInstitutionalMessagesPort } from '../domain/ports/in/IngestInstitutionalMessagesPort.js';
 import type { MessageNormalizerPort } from '../domain/ports/out/MessageNormalizerPort.js';
 import type { DueDateExtractorPort } from '../domain/ports/out/DueDateExtractorPort.js';
+import type { ClassificationPort } from '../../classification/domain/ports/out/ClassificationPort.js';
+import type { ClassificationRetryQueuePort } from '../../classification/domain/ports/out/ClassificationRetryQueuePort.js';
+import type { ClassificationResultRepositoryPort } from '../../classification/domain/ports/out/ClassificationResultRepositoryPort.js';
 
 export interface IngestInstitutionalMessagesDependencies {
   readonly mailbox: MailboxIngestionPort;
@@ -28,6 +31,9 @@ export interface IngestInstitutionalMessagesDependencies {
   readonly quarantineIncidentPolicy: QuarantineIncidentPolicy;
   readonly normalizer: MessageNormalizerPort;
   readonly dueDateExtractor: DueDateExtractorPort;
+  readonly classifier?: ClassificationPort;
+  readonly classificationRetryQueue?: ClassificationRetryQueuePort;
+  readonly classificationResultRepository?: ClassificationResultRepositoryPort;
   readonly clock: ClockPort;
   readonly batchSize: number;
 }
@@ -128,13 +134,43 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
    * documento nuevo, se consolida en el existente, o se actualiza su cuerpo.
    */
   private async consolidate(message: RawInstitutionalMessage): Promise<void> {
-    const { normalizer, deduplication, deduplicationWindowMs, consolidatedRegistry, dueDateExtractor } = this.deps;
+    const {
+      normalizer,
+      deduplication,
+      deduplicationWindowMs,
+      consolidatedRegistry,
+      dueDateExtractor,
+      classifier,
+      classificationRetryQueue,
+      classificationResultRepository,
+      clock
+    } = this.deps;
     const normalized = normalizer.normalize(message);
     const decision = await deduplication.decide(normalized, deduplicationWindowMs);
     // HU-08: se interpreta siempre sobre el cuerpo del mensaje entrante, no
     // sobre el del grupo existente — un reenvio puede traer una fecha
     // corregida o el enlace de postulacion que el aviso original omitio.
     const { dueDate, applicationLink } = dueDateExtractor.extract(normalized);
+
+    if (classifier) {
+      try {
+        const result = await classifier.classify(normalized);
+        if (classificationResultRepository) {
+          await classificationResultRepository.save(
+            result.toPersistedRecord(normalized.messageId.toString(), clock.now())
+          );
+        }
+      } catch (error) {
+        if (classificationRetryQueue) {
+          await classificationRetryQueue.save({
+            messageId: normalized.messageId.toString(),
+            message: normalized,
+            error: error instanceof Error ? error.message : String(error),
+            createdAt: clock.now()
+          });
+        }
+      }
+    }
 
     if (decision.kind === 'new') {
       await consolidatedRegistry.save({
