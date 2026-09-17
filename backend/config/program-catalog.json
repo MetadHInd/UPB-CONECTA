@@ -1,0 +1,28 @@
+{
+  "faculties": [
+    {
+      "id": "ingenieria",
+      "name": "Facultad de Ingeniería",
+      "programIds": ["sistemas", "industrial", "electronica"]
+    },
+    {
+      "id": "ciencias-administrativas",
+      "name": "Facultad de Ciencias Administrativas",
+      "programIds": ["administracion", "contaduria"]
+    },
+    {
+      "id": "humanidades",
+      "name": "Facultad de Humanidades",
+      "programIds": ["psicologia", "periodismo"]
+    }
+  ],
+  "programs": [
+    { "id": "sistemas", "name": "Ingeniería de Sistemas", "facultyId": "ingenieria" },
+    { "id": "industrial", "name": "Ingeniería Industrial", "facultyId": "ingenieria" },
+    { "id": "electronica", "name": "Ingeniería Electrónica", "facultyId": "ingenieria" },
+    { "id": "administracion", "name": "Administración de Empresas", "facultyId": "ciencias-administrativas" },
+    { "id": "contaduria", "name": "Contaduría Pública", "facultyId": "ciencias-administrativas" },
+    { "id": "psicologia", "name": "Psicología", "facultyId": "humanidades" },
+    { "id": "periodismo", "name": "Periodismo", "facultyId": "humanidades" }
+  ]
+}
