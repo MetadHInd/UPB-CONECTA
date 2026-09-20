@@ -14,6 +14,10 @@
         "/^npx vitest run tests/application tests/domain --config config/vitest\\.config\\.ts --coverage$/": {
             "approve": true,
             "matchCommandLine": true
-        }
+        },
+        "git checkout": true,
+        "git pull": true,
+        "git rev-parse": true,
+        "git push": true
     }
 }

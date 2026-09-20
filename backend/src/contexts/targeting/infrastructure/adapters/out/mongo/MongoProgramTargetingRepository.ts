@@ -58,6 +58,12 @@ function toDocument(record: ProgramTargetingRecord): ProgramTargetingDocument {
 export class MongoProgramTargetingRepository implements ProgramTargetingRepositoryPort {
   static readonly COLLECTION = 'program_targeting';
 
+  static async ensureIndexes(db: Db, collectionName = MongoProgramTargetingRepository.COLLECTION): Promise<void> {
+    await db.collection(collectionName).createIndex({ programIds: 1 }, { name: 'idx_program_ids' });
+    await db.collection(collectionName).createIndex({ facultyId: 1 }, { name: 'idx_faculty_id' });
+    await db.collection(collectionName).createIndex({ persistedAt: -1 }, { name: 'idx_persisted_at' });
+  }
+
   private readonly collection: Collection<ProgramTargetingDocument>;
 
   constructor(db: Db, collectionName = MongoProgramTargetingRepository.COLLECTION) {

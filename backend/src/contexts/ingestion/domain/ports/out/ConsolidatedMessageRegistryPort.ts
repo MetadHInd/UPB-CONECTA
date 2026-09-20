@@ -13,6 +13,8 @@ export interface ConsolidatedMessageRecord {
   readonly sender: string;
   readonly subject: string;
   readonly body: string;
+  /** Message-ID representative del grupo (el envio mas reciente que actualizo el grupo). */
+  readonly representativeMessageId?: string | null;
   /** Fecha del primer envio del grupo consolidado (se conserva siempre). */
   readonly firstSentAt: Date;
   /** Fecha del envio mas reciente: ancla movil de la ventana temporal. */
