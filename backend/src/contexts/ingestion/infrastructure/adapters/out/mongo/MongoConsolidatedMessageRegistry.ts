@@ -11,6 +11,7 @@ interface ConsolidatedMessageDocument {
   sender: string;
   subject: string;
   body: string;
+  representativeMessageId?: string | null;
   firstSentAt: Date;
   lastSentAt: Date;
   resendCount: number;
@@ -23,6 +24,7 @@ function toRecord(doc: ConsolidatedMessageDocument): ConsolidatedMessageRecord {
     sender: doc.sender,
     subject: doc.subject,
     body: doc.body,
+    representativeMessageId: doc.representativeMessageId ?? null,
     firstSentAt: doc.firstSentAt,
     lastSentAt: doc.lastSentAt,
     resendCount: doc.resendCount,
@@ -50,6 +52,13 @@ export class MongoConsolidatedMessageRegistry implements ConsolidatedMessageRegi
     await db
       .collection(collectionName)
       .createIndex({ sender: 1, subject: 1 }, { name: 'idx_sender_subject' });
+    await db.collection(collectionName).createIndex({ representativeMessageId: 1 }, { name: 'idx_representative_message' });
+    await db.collection(collectionName).createIndex({ lastSentAt: -1 }, { name: 'idx_last_sent_at' });
+    await db.collection(collectionName).createIndex({ dueDate: 1 }, { name: 'idx_due_date' });
+    // Compound index to accelerate lookups by representativeMessageId ordered by date
+    await db
+      .collection(collectionName)
+      .createIndex({ representativeMessageId: 1, lastSentAt: -1 }, { name: 'idx_repmsg_lastsent' });
   }
 
   async findWithinWindow(
@@ -81,6 +90,7 @@ export class MongoConsolidatedMessageRegistry implements ConsolidatedMessageRegi
           sender: record.sender,
           subject: record.subject,
           body: record.body,
+          representativeMessageId: record.representativeMessageId ?? null,
           firstSentAt: record.firstSentAt,
           lastSentAt: record.lastSentAt,
           resendCount: record.resendCount,
