@@ -14,4 +14,12 @@ export class InMemoryClassificationResultRepository implements ClassificationRes
 
     this.items.push(record);
   }
+
+  async findByMessageId(messageId: string): Promise<ClassificationResultRecord | null> {
+    return this.items.find((item) => item.messageId === messageId) ?? null;
+  }
+
+  async findAll(): Promise<readonly ClassificationResultRecord[]> {
+    return [...this.items];
+  }
 }

@@ -34,6 +34,8 @@ function buildRecord(overrides: Partial<ClassificationResultRecord> = {}): Class
     isKnownFalsePositiveCase: false,
     reason: null,
     appliedRuleId: null,
+    confidenceScore: 1,
+    publicationStatus: 'published',
     persistedAt: new Date('2026-08-01T00:00:00Z'),
     ...overrides
   };
