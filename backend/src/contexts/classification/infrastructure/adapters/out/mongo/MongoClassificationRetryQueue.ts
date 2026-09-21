@@ -10,7 +10,18 @@ export class MongoClassificationRetryQueue implements ClassificationRetryQueuePo
     this.collection = db.collection<ClassificationRetryEntry & { _id?: string }>(MongoClassificationRetryQueue.COLLECTION);
   }
 
+  /**
+   * Upsert, no insert: si la ingesta se interrumpe despues de guardar aqui y
+   * antes de marcar el mensaje como procesado, el mensaje se relee. Un
+   * `insertOne` fallaria por clave duplicada en cada ciclo y detendria el lote
+   * para siempre. Se conserva el `createdAt` del primer intento.
+   */
   async save(entry: ClassificationRetryEntry): Promise<void> {
-    await this.collection.insertOne({ ...entry, _id: entry.messageId });
+    const { createdAt, ...latest } = entry;
+    await this.collection.updateOne(
+      { _id: entry.messageId },
+      { $set: latest, $setOnInsert: { createdAt } },
+      { upsert: true }
+    );
   }
 }

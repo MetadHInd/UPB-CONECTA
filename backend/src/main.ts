@@ -15,6 +15,14 @@ import { SystemClock } from './contexts/ingestion/infrastructure/adapters/out/me
 import { MimeMessageNormalizerAdapter } from './contexts/ingestion/infrastructure/adapters/out/normalization/MimeMessageNormalizerAdapter.js';
 import { SpanishDueDateExtractor } from './contexts/ingestion/infrastructure/extraction/SpanishDueDateExtractor.js';
 import { buildFixtureMessages } from './contexts/ingestion/infrastructure/fixtures/institutionalMessages.js';
+import { ClassifyInstitutionalMessage } from './contexts/classification/application/ClassifyInstitutionalMessage.js';
+import { InMemoryClassificationAdapter } from './contexts/classification/infrastructure/adapters/out/memory/InMemoryClassificationAdapter.js';
+import { InMemoryAdminAlertPort } from './contexts/classification/infrastructure/adapters/out/memory/InMemoryAdminAlertPort.js';
+import { InMemoryNotificationSchedulingPort } from './contexts/classification/infrastructure/adapters/out/memory/InMemoryNotificationSchedulingPort.js';
+import { MongoClassificationResultRepository } from './contexts/classification/infrastructure/adapters/out/mongo/MongoClassificationResultRepository.js';
+import { MongoClassificationRetryQueue } from './contexts/classification/infrastructure/adapters/out/mongo/MongoClassificationRetryQueue.js';
+import { MongoPostProcessingRuleRepository } from './contexts/classification/infrastructure/adapters/out/mongo/MongoPostProcessingRuleRepository.js';
+import { MongoReviewThresholdConfig } from './contexts/classification/infrastructure/adapters/out/mongo/MongoReviewThresholdConfig.js';
 
 /**
  * Raiz de composicion: unico lugar del sistema donde el dominio se encuentra
@@ -31,10 +39,31 @@ async function bootstrap(): Promise<void> {
   await MongoProcessedMessageRegistry.ensureIndexes(db);
   await MongoConsolidatedMessageRegistry.ensureIndexes(db);
   await MongoIngestionRunLogRepository.ensureIndexes(db);
+  await MongoClassificationResultRepository.ensureIndexes(db);
+  await MongoPostProcessingRuleRepository.ensureIndexes(db);
 
+  const clock = new SystemClock();
   const registry = new MongoProcessedMessageRegistry(db);
   const consolidatedRegistry = new MongoConsolidatedMessageRegistry(db);
+  // ATENCION: al sustituir este adaptador por el cliente IMAP real, revisar
+  // tambien la clasificacion de abajo. Con correo real, el clasificador
+  // simulado (0.4 en el cubo por defecto) y el umbral por defecto (0.6)
+  // retendrian en revision pendiente todo lo que no reconozca, y la alerta
+  // al administrador es un stub que nadie lee: retencion silenciosa, justo lo
+  // que HU-10 quiere evitar. Ver README de `classification`.
   const mailbox = new InMemoryMailboxAdapter(buildFixtureMessages());
+
+  // Clasificacion completa: HU-06 (stub), reglas de HU-09 y umbral de HU-10.
+  const classifyMessage = new ClassifyInstitutionalMessage({
+    classificationPort: new InMemoryClassificationAdapter(),
+    resultRepository: new MongoClassificationResultRepository(db),
+    retryQueue: new MongoClassificationRetryQueue(db),
+    ruleRepository: new MongoPostProcessingRuleRepository(db),
+    reviewThresholdConfig: new MongoReviewThresholdConfig(db),
+    adminAlertPort: new InMemoryAdminAlertPort(),
+    notificationSchedulingPort: new InMemoryNotificationSchedulingPort(),
+    clock
+  });
 
   const useCase = new IngestInstitutionalMessages({
     mailbox,
@@ -49,7 +78,8 @@ async function bootstrap(): Promise<void> {
     quarantineIncidentPolicy: new QuarantineIncidentPolicy(config.quarantineIncidentThresholdRatio),
     normalizer: new MimeMessageNormalizerAdapter(),
     dueDateExtractor: new SpanishDueDateExtractor(),
-    clock: new SystemClock(),
+    classifyMessage,
+    clock,
     batchSize: config.batchSize
   });
 

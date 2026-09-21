@@ -60,9 +60,6 @@ describe('Quarantine exclusion', () => {
       quarantineIncidentPolicy: { exceedsThreshold: () => false },
       normalizer: { normalize: (m: any) => { throw new Error('should not be called'); } },
       dueDateExtractor: { extract: () => ({ dueDate: null, applicationLink: null }) },
-      classifier: undefined,
-      classificationRetryQueue: undefined,
-      classificationResultRepository: undefined,
       clock: new SystemClock(),
       batchSize: 10
     } as any);

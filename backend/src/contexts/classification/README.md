@@ -345,18 +345,89 @@ con fixtures sintéticas.
 > cifras de las pruebas vienen de fixtures sintéticas y no son resultados
 > empíricos.
 
-### Límite conocido — el pipeline de ingesta no usa este caso de uso
+### Conexión con la ingesta real (corrección técnica posterior a HU-10)
 
-`IngestInstitutionalMessages.consolidate()` (contexto `ingestion`) clasifica en
-línea: llama directamente a `classifier.classify(...)` y a
-`classificationResultRepository.save(...)`, **sin pasar por
-`ClassifyInstitutionalMessage`**. Por eso tampoco aplica las reglas de HU-09 ni
-el umbral de HU-10. Además, `main.ts` todavía no conecta ningún clasificador.
-Esta duplicación es anterior a esta historia. Unificar el pipeline para que
-delegue en `ClassifyInstitutionalMessage` queda fuera de este alcance, pero es
-el paso necesario para que el umbral actúe en la ingesta real. En ese camino,
-los registros se guardan con los valores por defecto (`confidenceScore` 1,
-`publicationStatus` `'published'`).
+Hasta HU-10, `IngestInstitutionalMessages.consolidate()` clasificaba por su
+cuenta con una copia de la lógica de HU-06: no aplicaba las reglas de HU-09 ni
+el umbral de HU-10, y `main.ts` no conectaba ningún clasificador. Esa copia se
+eliminó. La ingesta ahora recibe una sola dependencia opcional,
+`classifyMessage?: ClassifyInstitutionalMessage`, y delega en ella. Detalle
+en el README de `ingestion`.
+
+- **Reloj inyectado:** `ClassifyInstitutionalMessage` recibe un `ClockPort`
+  **obligatorio** (propio de este contexto, igual que `ingestion`, `consent` y
+  `notifications`) para `persistedAt` y `createdAt`, en lugar de `new Date()`.
+  Es obligatorio y no opcional porque un reloj por defecto al del sistema
+  volvería no deterministas los tiempos justo en el camino que ahora recorre
+  la ingesta real. `ClassificationResult.toPersistedRecord` conserva su
+  parámetro por defecto `new Date()` para quien lo llame sin fecha, pero el
+  caso de uso siempre le pasa la del reloj.
+- **Política de reenvíos:** ver la sección siguiente.
+- **Cola de reintento idempotente:** `MongoClassificationRetryQueue.save` usa
+  upsert por `_id` (conserva el `createdAt` del primer intento y actualiza el
+  error), en vez de `insertOne`. Antes, si la ingesta se interrumpía después
+  de guardar en la cola y antes de `markAsProcessed`, el mensaje se releía, el
+  insert fallaba por clave duplicada en cada ciclo y el lote quedaba detenido
+  para siempre. Esto se vuelve realista con una regla de descarte de HU-09,
+  que se repite de forma determinista. El doble en memoria tiene la misma
+  semántica.
+- **`main.ts` conecta la clasificación completa:** clasificador simulado de
+  HU-06, repositorios Mongo de resultados, cola de reintento, reglas y umbral,
+  y los stubs de alerta y notificaciones, con `ensureIndexes` de resultados y
+  reglas. La colección del umbral y la cola de reintento se consultan por
+  `_id`, así que no necesitan índice adicional.
+
+### Política de reenvíos (opción B)
+
+HU-03 consolida los reenvíos de una convocatoria en un mismo grupo, pero
+`consolidate()` se ejecuta una vez por cada mensaje que llega. Se evaluaron
+tres opciones:
+
+- **A — clasificar y notificar solo el primer mensaje del grupo.**
+  **Descartada por un bug concreto:** en cada reenvío, el grupo cambia su
+  `representativeMessageId` al mensaje nuevo, y el feed (HU-10) busca el
+  estado de publicación por ese id. Si el reenvío no se clasifica, no tiene
+  registro, el feed lo trata como visible, y una convocatoria en revisión
+  pendiente **reaparecería en el feed con el primer recordatorio**.
+- **B — clasificar siempre, pero alertar o notificar solo cuando el estado de
+  publicación del grupo cambia. Elegida.** Cada representativo tiene su
+  registro (el feed sigue siendo correcto) y un reenvío corregido sí se
+  refleja en la clasificación.
+- **C — clasificar y notificar siempre.** Descartada: produce exactamente los
+  avisos duplicados que la deduplicación de HU-03 existe para evitar.
+
+Implementación: la decisión es política de dominio pura,
+`decidePublicationNotification(anterior, actual)`
+(`domain/services/PublicationNotificationPolicy.ts`). `anterior` es el estado
+del `representativeMessageId` previo del grupo, que la ingesta pasa como
+`execute(mensaje, previousMessageId)`.
+
+| Estado anterior | Estado actual | Acción |
+|---|---|---|
+| ninguno | `published` | programar notificaciones |
+| ninguno | `pending-review` | alertar al administrador |
+| igual al actual | igual | nada |
+| `pending-review` | `published` | programar notificaciones |
+| `published` | `pending-review` | alertar al administrador |
+
+"Ninguno" incluye un grupo nuevo y un grupo cuyo representativo anterior no
+tiene registro (su clasificación falló o una regla la descartó), porque nada
+se avisó todavía. Límite conocido: la política mira **solo el estado de
+publicación**. Si un reenvío cambia la categoría (por ejemplo, de boletín a
+convocatoria con plazo) sin cambiar el estado, el registro y el feed se
+actualizan, pero no se vuelve a notificar.
+
+### Riesgo antes de conectar el buzón real
+
+Con los mensajes de prueba de `main.ts`, el boletín de bienestar queda en 0.4 y
+por lo tanto en revisión pendiente, como se verificó arrancando `main.ts`
+contra MongoDB. Hoy eso no tiene efecto externo: el buzón y los stubs de
+alerta y notificaciones son simulados. **Al sustituir el buzón por el cliente
+IMAP real** hay que revisar también la clasificación. Con correo real, el
+clasificador simulado retendría en revisión todo lo que no reconoce, y la
+alerta al administrador es un stub que nadie lee: sería una retención
+silenciosa, justo lo que HU-10 quiere evitar. `main.ts` lo advierte en esa
+misma línea.
 
 ### Criterios de aceptación y pruebas (HU-10)
 

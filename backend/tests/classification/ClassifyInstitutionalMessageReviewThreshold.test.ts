@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MessageId } from '../../src/contexts/ingestion/domain/value-objects/MessageId.js';
 import type { InstitutionalMessage } from '../../src/contexts/ingestion/domain/entities/InstitutionalMessage.js';
 import { ClassifyInstitutionalMessage } from '../../src/contexts/classification/application/ClassifyInstitutionalMessage.js';
+import { SystemClock } from '../../src/contexts/classification/infrastructure/adapters/out/memory/SystemClock.js';
 import { ClassificationResult } from '../../src/contexts/classification/domain/entities/ClassificationResult.js';
 import { MessageCategory } from '../../src/contexts/classification/domain/value-objects/MessageCategory.js';
 import { ConfidenceScore } from '../../src/contexts/classification/domain/value-objects/ConfidenceScore.js';
@@ -42,6 +43,7 @@ function buildUseCase(score: number, threshold = 0.6) {
   const adminAlertPort = new InMemoryAdminAlertPort();
   const notificationSchedulingPort = new InMemoryNotificationSchedulingPort();
   const useCase = new ClassifyInstitutionalMessage({
+    clock: new SystemClock(),
     classificationPort: classifierReturning(score),
     resultRepository,
     reviewThresholdConfig,
@@ -113,6 +115,7 @@ describe('HU-10 — umbral de revision integrado en ClassifyInstitutionalMessage
     });
 
     const useCase = new ClassifyInstitutionalMessage({
+      clock: new SystemClock(),
       classificationPort: classifierReturning(0.75),
       resultRepository,
       ruleRepository,
@@ -142,6 +145,7 @@ describe('HU-10 — umbral de revision integrado en ClassifyInstitutionalMessage
     });
 
     const useCase = new ClassifyInstitutionalMessage({
+      clock: new SystemClock(),
       classificationPort: classifierReturning(0.42),
       resultRepository,
       ruleRepository
@@ -155,6 +159,7 @@ describe('HU-10 — umbral de revision integrado en ClassifyInstitutionalMessage
   it('sin umbral configurado se publica todo, como antes de HU-10', async () => {
     const resultRepository = new InMemoryClassificationResultRepository();
     const useCase = new ClassifyInstitutionalMessage({
+      clock: new SystemClock(),
       classificationPort: classifierReturning(0.1),
       resultRepository
     });

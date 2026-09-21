@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MessageId } from '../../src/contexts/ingestion/domain/value-objects/MessageId.js';
 import { ClassifyInstitutionalMessage } from '../../src/contexts/classification/application/ClassifyInstitutionalMessage.js';
+import { SystemClock } from '../../src/contexts/classification/infrastructure/adapters/out/memory/SystemClock.js';
 import { ClassificationCategory } from '../../src/contexts/classification/domain/value-objects/MessageCategory.js';
 import { ClassificationResult } from '../../src/contexts/classification/domain/entities/ClassificationResult.js';
 import { InMemoryClassificationAdapter } from '../../src/contexts/classification/infrastructure/adapters/out/memory/InMemoryClassificationAdapter.js';
@@ -38,6 +39,7 @@ describe('HU-06 — clasificación de mensajes institucionales', () => {
     const retryQueue = new InMemoryClassificationRetryQueue();
     const resultRepository = new InMemoryClassificationResultRepository();
     const useCase = new ClassifyInstitutionalMessage({
+      clock: new SystemClock(),
       classificationPort: {
         classify: async () => {
           throw new Error('timeout del proveedor de IA');

@@ -9,6 +9,8 @@ import type { PostProcessingRuleRepositoryPort } from '../domain/ports/out/PostP
 import type { ReviewThresholdConfigPort } from '../domain/ports/out/ReviewThresholdConfigPort.js';
 import { applyPostProcessingRules } from '../domain/rules/PostProcessingRuleChain.js';
 import { decidePublicationStatus } from '../domain/services/PublicationDecisionPolicy.js';
+import { decidePublicationNotification } from '../domain/services/PublicationNotificationPolicy.js';
+import type { ClockPort } from '../domain/ports/out/ClockPort.js';
 
 export interface ClassifyInstitutionalMessageDependencies {
   readonly classificationPort: ClassificationPort;
@@ -26,12 +28,25 @@ export interface ClassifyInstitutionalMessageDependencies {
   readonly reviewThresholdConfig?: ReviewThresholdConfigPort;
   readonly adminAlertPort?: AdminAlertPort;
   readonly notificationSchedulingPort?: NotificationSchedulingPort;
+  /**
+   * Obligatorio, igual que en `IngestInstitutionalMessages`: un reloj por
+   * defecto al del sistema haria no deterministas `persistedAt`/`createdAt`
+   * justo en el camino que ahora recorre la ingesta real.
+   */
+  readonly clock: ClockPort;
 }
 
 export class ClassifyInstitutionalMessage {
   constructor(private readonly deps: ClassifyInstitutionalMessageDependencies) {}
 
-  async execute(message: InstitutionalMessage): Promise<ClassificationResult | null> {
+  /**
+   * `previousMessageId`: cuando el mensaje es un reenvio que HU-03 consolida
+   * en un grupo existente, el `representativeMessageId` anterior de ese
+   * grupo. Con el se aplica la politica de reenvios: solo se alerta o se
+   * notifica si el estado de publicacion cambia (ver
+   * `PublicationNotificationPolicy` y el README de `classification`).
+   */
+  async execute(message: InstitutionalMessage, previousMessageId: string | null = null): Promise<ClassificationResult | null> {
     try {
       const proposed = await this.deps.classificationPort.classify(message);
       const result = await this.applyPostProcessing(proposed, message);
@@ -41,13 +56,15 @@ export class ClassifyInstitutionalMessage {
       }
 
       if (this.deps.resultRepository) {
+        const previous = previousMessageId ? await this.deps.resultRepository.findByMessageId(previousMessageId) : null;
         const publicationStatus = await this.resolvePublicationStatus(result);
-        const record = result.toPersistedRecord(message.messageId.toString(), new Date(), publicationStatus);
+        const record = result.toPersistedRecord(message.messageId.toString(), this.deps.clock.now(), publicationStatus);
         await this.deps.resultRepository.save(record);
 
-        if (publicationStatus === 'pending-review') {
+        const notification = decidePublicationNotification(previous?.publicationStatus ?? null, publicationStatus);
+        if (notification === 'alert-admin') {
           await this.deps.adminAlertPort?.notifyPendingReview(record);
-        } else {
+        } else if (notification === 'schedule-notifications') {
           await this.deps.notificationSchedulingPort?.scheduleForPublication(record);
         }
       }
@@ -61,7 +78,7 @@ export class ClassifyInstitutionalMessage {
           messageId: message.messageId.toString(),
           message,
           error: cause,
-          createdAt: new Date()
+          createdAt: this.deps.clock.now()
         });
       }
 
@@ -133,7 +150,7 @@ export class ClassifyInstitutionalMessage {
             messageId: message.messageId.toString(),
             message,
             error: `Descartado por regla de posprocesamiento: ${outcome.appliedRuleId}`,
-            createdAt: new Date(),
+            createdAt: this.deps.clock.now(),
             discardedByRuleId: outcome.appliedRuleId,
             proposedCategory: proposed.proposedCategory
           });

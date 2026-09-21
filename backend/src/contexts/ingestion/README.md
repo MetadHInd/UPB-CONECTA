@@ -161,6 +161,37 @@ cuerpo se conserva la extracción original (evita que la inferencia de año, que
 | 5. Enlace de postulación identificado y almacenado | `SpanishDueDateExtractor.test.ts`, `IngestInstitutionalMessages.test.ts` |
 | Definición de terminado: ≥95% de acierto sobre un corpus etiquetado | `SpanishDueDateExtractor.accuracy.test.ts` (20 mensajes, 100% en la última corrida) |
 
+## Clasificación conectada a la ingesta (corrección técnica de HU-06/HU-09/HU-10)
+
+No es una historia nueva. Hasta HU-10, `consolidate()` tenía una copia de unas
+19 líneas de la clasificación de HU-06 (`classifier.classify` → guardar, o
+cola de reintento), con tres dependencias sueltas: `classifier`,
+`classificationRetryQueue` y `classificationResultRepository`. Esa copia
+nunca recibió las reglas de HU-09 ni el umbral de HU-10, y `main.ts` no la
+conectaba.
+
+- `IngestInstitutionalMessagesDependencies` ahora tiene **una sola**
+  dependencia opcional, `classifyMessage?: ClassifyInstitutionalMessage`. El
+  bloque duplicado se reemplazó por `classifyMessage?.execute(normalizado,
+  previousMessageId)`.
+- **Política de reenvíos (opción B):** se clasifica cada mensaje, también los
+  reenvíos, porque cada uno pasa a ser el `representativeMessageId` del grupo
+  y el feed lee su estado. Solo se alerta o se notifica si el estado de
+  publicación del grupo cambia. Justificación completa (y por qué la opción A
+  rompería la exclusión del feed) en el README de `classification`.
+- Si el clasificador falla, `ClassifyInstitutionalMessage` manda el mensaje a
+  su cola de reintento y el lote continúa, igual que antes.
+- `main.ts` **sí conecta** la clasificación. Hoy todo es simulado (buzón de
+  prueba y stubs de alerta y notificaciones), así que no hay efecto externo.
+  Dejarla desconectada habría mantenido muerto el camino que esta corrección
+  unifica. El riesgo al conectar el buzón real está advertido en `main.ts`.
+
+Pruebas: `tests/ingestion/IngestionClassification.test.ts` (mensaje nuevo,
+reenvío sin cambio de estado, reenvío en revisión, reenvío que pasa de
+revisión a publicado, fallo del clasificador sin romper el lote) y
+`tests/classification/PublicationNotificationPolicy.test.ts`. La prueba de
+rendimiento de HU-55 sigue midiendo el pipeline **sin** clasificador.
+
 ## HU-55 — Rendimiento bajo carga y degradación controlada (RNF-01 a RNF-12, RNF-40) — **parcial**
 
 Historia de verificación transversal (300 sesiones concurrentes, 3.000 usuarios, feed/foro/mapa con
