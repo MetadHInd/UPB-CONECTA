@@ -192,6 +192,28 @@ revisión a publicado, fallo del clasificador sin romper el lote) y
 `tests/classification/PublicationNotificationPolicy.test.ts`. La prueba de
 rendimiento de HU-55 sigue midiendo el pipeline **sin** clasificador.
 
+## Corrección: un mensaje que falla siempre ya no bloquea el buzón (bug 2)
+
+Corrección técnica posterior a HU-37 (rama `correccion-bugs-integracion`), no una historia del backlog.
+
+**Problema real (confirmado con prueba).** Si procesar un mensaje lanza una excepción (normalización, extracción, consolidación, registro), la ingesta conserva el cursor en el último mensaje confirmado (HU-01) y aborta el ciclo. Un mensaje que falla **siempre** se relee en cada ciclo, para siempre, y **nada de lo que llegó después se procesa nunca**. Prueba: `tests/application/IngestInstitutionalMessages.poisonMessage.test.ts`; antes de la corrección, el tercer ciclo seguía abortando.
+
+El prompt describía el bug como reintentos sin límite en "la cola de reintento de mailbox de HU-05". **Esa cola no existe.** HU-05 (`RetryingMailboxAdapter`) reintenta la *lectura* del buzón dentro de un mismo ciclo ante `MailboxUnavailableError`, con backoff y un límite propio (`MAILBOX_RETRY_MAX_ATTEMPTS`). No reintenta mensajes individuales entre ciclos. El reintento indefinido entre ciclos era este bloqueo por mensaje, y ahí se aplicó el contador.
+
+**Corrección.**
+- `MessageFailureRepositoryPort.recordFailure(uid, cause, at)` cuenta los ciclos fallidos por uid (memoria y Mongo; `ingestion_message_failures`, `$inc` atómico).
+- Mientras el contador esté por debajo del umbral, el comportamiento es **el mismo de antes**: se conserva el cursor y se aborta el ciclo, así un fallo transitorio se resuelve solo en el siguiente ciclo.
+- Al alcanzar el umbral, el mensaje se guarda en **cuarentena** (`QuarantineRepositoryPort` de HU-04) con la causa y el número de ciclos, se cuenta en `log.quarantined` (entra en el umbral de incidente de HU-04), el cursor avanza sobre él y **el lote continúa**.
+- Como `RawInstitutionalMessage` ya no conserva el MIME original, `rawSource` es una reconstrucción de los encabezados que sí conserva (`Message-ID`, `From`, `Subject`, `Date`) más el cuerpo crudo.
+- **Si el propio contador no se puede escribir** (por ejemplo, Mongo caído), no se pone nada en cuarentena y se propaga el error original. Una caída de infraestructura no debe mandar mensajes sanos a cuarentena.
+
+**Umbral.** `INGESTION_MESSAGE_MAX_ATTEMPTS`, por defecto **3**. Con el intervalo por defecto de 5 minutos equivale a unos 15 minutos de bloqueo antes de la cuarentena. Se lee al arrancar, igual que `DEDUPLICATION_WINDOW_MS`: cambiarlo requiere reiniciar, no recompilar. Es un umbral **solo para el buzón**, distinto de `MAILBOX_RETRY_MAX_ATTEMPTS`: aquel cuenta reintentos de lectura dentro de un ciclo, este cuenta ciclos fallidos del mismo mensaje. **El prompt pedía el umbral también para la clasificación y eso quedó pendiente:** su cola no tiene consumidor que reintente, así que primero hace falta ese consumidor. Ver "Gap pendiente: umbral de reintentos de clasificación hacia cuarentena" en el README de `classification`.
+
+**Limitaciones conocidas.**
+- Un fallo parcial (por ejemplo, consolidado pero sin llegar a `markAsProcessed`) puede dejar un documento consolidado de un mensaje que termina en cuarentena. Es el mismo riesgo que ya existía entre ciclos.
+- Una falla de infraestructura *parcial* (una colección caída y otra no) podría acumular fallos en un mensaje sano. El umbral y la cuarentena reversible lo acotan: reprocesar desde cuarentena sigue siendo el criterio 5 diferido de HU-04.
+- `IngestInstitutionalMessages` recibe la política como dependencia opcional (`poisonMessages`), igual que `classifyMessage`. `main.ts` la cablea.
+
 ## HU-55 — Rendimiento bajo carga y degradación controlada (RNF-01 a RNF-12, RNF-40) — **parcial**
 
 Historia de verificación transversal (300 sesiones concurrentes, 3.000 usuarios, feed/foro/mapa con

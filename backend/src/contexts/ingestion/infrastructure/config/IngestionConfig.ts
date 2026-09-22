@@ -10,6 +10,11 @@ export interface IngestionConfig {
   readonly deduplicationWindowMs: number;
   /** HU-04, criterio 4: proporcion de cuarentena (0-1) que dispara revision prioritaria. */
   readonly quarantineIncidentThresholdRatio: number;
+  /**
+   * Correccion del bug 2: ciclos de ingesta fallidos sobre el mismo mensaje
+   * antes de derivarlo a cuarentena.
+   */
+  readonly messageMaxAttempts: number;
 }
 
 export interface MailboxResilienceConfig {
@@ -36,6 +41,11 @@ const DEFAULT_DEDUPLICATION_WINDOW_MS = 2_592_000_000; // 30 dias
 
 // HU-04: proporcion de cuarentena por defecto que dispara revision prioritaria
 const DEFAULT_QUARANTINE_INCIDENT_THRESHOLD_RATIO = 0.2; // 20%
+
+// Bug 2: con el intervalo por defecto (5 min), 3 ciclos = unos 15 minutos
+// bloqueado antes de ir a cuarentena; tiempo de sobra para que un fallo
+// transitorio se resuelva solo.
+const DEFAULT_MESSAGE_MAX_ATTEMPTS = 3;
 
 // Parametros por defecto para la politica de reintento (HU-05)
 const DEFAULT_MAILBOX_RETRY_MAX_ATTEMPTS = 3; // ademas del intento original
@@ -64,13 +74,19 @@ export function readIngestionConfig(env: NodeJS.ProcessEnv = process.env): Inges
     'QUARANTINE_INCIDENT_THRESHOLD_RATIO'
   );
 
+  const messageMaxAttempts = parsePositiveInteger(
+    env['INGESTION_MESSAGE_MAX_ATTEMPTS'],
+    DEFAULT_MESSAGE_MAX_ATTEMPTS,
+    'INGESTION_MESSAGE_MAX_ATTEMPTS'
+  );
+
   if (intervalMs < MIN_INTERVAL_MS) {
     throw new InvalidIngestionConfigError(
       `el intervalo ${intervalMs} ms es inferior al minimo permitido de ${MIN_INTERVAL_MS} ms`
     );
   }
 
-  return { intervalMs, batchSize, deduplicationWindowMs, quarantineIncidentThresholdRatio };
+  return { intervalMs, batchSize, deduplicationWindowMs, quarantineIncidentThresholdRatio, messageMaxAttempts };
 }
 
 export function readMailboxResilienceConfig(env: NodeJS.ProcessEnv = process.env): MailboxResilienceConfig {
