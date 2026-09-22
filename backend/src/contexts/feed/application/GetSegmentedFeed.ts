@@ -1,5 +1,5 @@
 import type { ConvocatoriaRepositoryPort } from '../domain/ports/out/ConvocatoriaRepositoryPort.js';
-import type { IdentityProfile } from '../../identity/domain/entities/IdentityProfile.js';
+import type { StudentSegment } from '../domain/value-objects/StudentSegment.js';
 import type { ProgramTargetingRepositoryPort } from '../../targeting/domain/ports/out/ProgramTargetingRepositoryPort.js';
 import type { ClassificationResultRepositoryPort } from '../../classification/domain/ports/out/ClassificationResultRepositoryPort.js';
 import { FeedVisibilityPolicy } from '../domain/services/FeedVisibilityPolicy.js';
@@ -22,7 +22,7 @@ export class GetSegmentedFeed {
     }
   ) {}
 
-  async execute(profile: IdentityProfile, limit?: number) {
+  async execute(profile: StudentSegment, limit?: number) {
     const entries = await this.deps.convocatoriaRepo.findSegmentedFeed(profile, typeof limit === 'undefined' ? undefined : { limit });
     const policy = new FeedVisibilityPolicy(this.deps.facultyResolver);
 
@@ -36,7 +36,7 @@ export class GetSegmentedFeed {
       const targetingRecord = await this.deps.programTargetingRepo.findByMessageId(repMessageId);
       const targeting = targetingRecord ? targetingRecord.targeting : allCommunityTargeting();
 
-      if (policy.isVisible(targeting, profile)) {
+      if (policy.isVisible(targeting, profile, targetingRecord?.semesterRange ?? null)) {
         visible.push(entry);
       }
     }

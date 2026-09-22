@@ -11,6 +11,10 @@ Alcance y límites
 HU-10 — exclusión de documentos en revisión pendiente
 - `GetSegmentedFeed` acepta un `classificationResultRepo` opcional. Si se provee, una convocatoria cuyo `representativeMessageId` tiene `publicationStatus: 'pending-review'` se excluye del feed (prueba: `tests/feed/ReviewPendingExclusion.test.ts`). Sin registro de clasificación, la convocatoria se considera visible. Detalle y justificación en el README de `classification`, sección HU-10.
 
+HU-37 — semestre en la segmentación
+- `FeedVisibilityPolicy.isVisible(targeting, student, semesters)` exige programa y, si la convocatoria tiene `semesterRange`, que el semestre del estudiante esté en el rango. El feed recibe `StudentSegment { program?, semester? }` en vez de `IdentityProfile`.
+- `GetStudentFeed` toma el segmento del perfil persistido (`StudentSegmentPort`), para que un semestre editado aplique en la siguiente carga. Es el punto de entrada que debe usar la capa HTTP. Detalle en `src/contexts/profile/README.md`.
+
 Gaps conocidos
 - Clasificación/temas no se materializa en la colección de convocatorias: si se desea indexar por `tema` habrá que duplicar los temas en el documento consolidado al momento de consolidar.
 - La resolución de targeting se hace consultando `program_targeting` por `messageId` y luego consultando `ingestion_consolidated_messages` por `representativeMessageId`.

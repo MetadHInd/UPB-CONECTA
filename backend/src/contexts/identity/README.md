@@ -12,6 +12,10 @@ La política del backend es explícita:
 - la autenticación debe devolver mensajes genéricos para evitar filtrar si el usuario o la contraseña son incorrectos;
 - se aplica rate limiting para evitar fuerza bruta.
 
+## Sincronización del perfil (HU-37)
+
+`AuthenticateStudent` recibe una dependencia obligatoria `profileSync: AuthenticatedProfileSyncPort`. Tras cada autenticación correcta, y antes de emitir la sesión, envía los datos frescos del directorio al contexto `profile`, que implementa el puerto. `identity` no importa nada de `profile`. Si la sincronización falla, el login falla. Detalle en `src/contexts/profile/README.md`.
+
 ## Puertos y adaptadores
 
 ### Dominio

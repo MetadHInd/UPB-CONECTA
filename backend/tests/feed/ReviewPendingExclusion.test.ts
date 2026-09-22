@@ -31,7 +31,7 @@ describe('HU-10 — exclusion del feed de documentos en revision pendiente (gap 
       classificationResultRepo
     });
 
-    const result = await useCase.execute({ name: 'Ana', email: 'a@x', program: 'P1', semester: 3 });
+    const result = await useCase.execute({ program: 'P1', semester: 3 });
     const ids = result.feed.map((entry) => entry.id);
 
     expect(ids).toContain('c-publicado');
