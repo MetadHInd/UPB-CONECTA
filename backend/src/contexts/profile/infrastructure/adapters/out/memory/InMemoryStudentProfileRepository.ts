@@ -18,7 +18,7 @@ export class InMemoryStudentProfileRepository implements StudentProfileRepositor
       email,
       StudentProfile.restore({
         email,
-        program: profile.directory.program,
+        programId: profile.directory.programId,
         semester: profile.semester,
         semesterSource: profile.semesterSource,
         updatedAt: profile.updatedAt,

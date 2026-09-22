@@ -9,7 +9,8 @@ import { SemesterNumber, type SemesterBounds } from '../../../../domain/value-ob
  */
 interface StudentProfileDocument {
   _id: string;
-  program: string;
+  /** Id del catalogo institucional, o null si el programa del directorio no se reconocio. */
+  programId: string | null;
   semester: number | null;
   semesterSource: SemesterSource;
   updatedAt: Date;
@@ -40,7 +41,7 @@ export class MongoStudentProfileRepository implements StudentProfileRepositoryPo
     if (doc === null) return null;
     return StudentProfile.restore({
       email: doc._id,
-      program: doc.program,
+      programId: doc.programId,
       semester: doc.semester === null ? null : SemesterNumber.fromDirectory(doc.semester, this.bounds),
       semesterSource: doc.semesterSource,
       updatedAt: doc.updatedAt,
@@ -50,7 +51,7 @@ export class MongoStudentProfileRepository implements StudentProfileRepositoryPo
 
   async save(profile: StudentProfile): Promise<boolean> {
     const fields = {
-      program: profile.directory.program,
+      programId: profile.directory.programId,
       semester: profile.semester?.value ?? null,
       semesterSource: profile.semesterSource,
       updatedAt: profile.updatedAt,

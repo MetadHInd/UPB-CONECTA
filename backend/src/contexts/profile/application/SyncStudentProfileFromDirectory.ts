@@ -1,5 +1,6 @@
 import { normalizeEmail, StudentProfile, type DirectoryRecord } from '../domain/entities/StudentProfile.js';
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
+import type { ProgramCatalogPort } from '../domain/ports/out/ProgramCatalogPort.js';
 import type { StudentProfileRepositoryPort } from '../domain/ports/out/StudentProfileRepositoryPort.js';
 import type { SemesterBounds } from '../domain/value-objects/SemesterNumber.js';
 import { saveWithRetry } from './saveWithRetry.js';
@@ -22,17 +23,21 @@ export class SyncStudentProfileFromDirectory {
       readonly profiles: StudentProfileRepositoryPort;
       readonly clock: ClockPort;
       readonly bounds: SemesterBounds;
+      readonly programs: ProgramCatalogPort;
     }
   ) {}
 
   async execute(record: DirectoryRecord): Promise<StudentProfile> {
-    const { profiles, clock, bounds } = this.dependencies;
+    const { profiles, clock, bounds, programs } = this.dependencies;
     const email = normalizeEmail(record.email);
+    // Bug 3: se traduce en cada login, asi un programa que el catalogo agregue
+    // despues queda reconocido en la siguiente autenticacion.
+    const programId = programs.resolveProgramId(record.program);
 
     const saved = await saveWithRetry(profiles, email, (current) =>
       current === null
-        ? StudentProfile.fromDirectory(record, bounds, clock.now())
-        : current.syncedWith(record, bounds, clock.now())
+        ? StudentProfile.fromDirectory(record, programId, bounds, clock.now())
+        : current.syncedWith(record, programId, bounds, clock.now())
     );
     // `apply` nunca devuelve null aqui, asi que el unico fallo posible es el conflicto.
     if (typeof saved === 'string') throw new ProfileSyncConflictError(email);

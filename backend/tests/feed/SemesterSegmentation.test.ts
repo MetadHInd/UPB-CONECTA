@@ -86,7 +86,7 @@ describe('HU-37 criterios 3 y 4 — el semestre editado recalcula el feed', () =
     await harness.update.execute({ email: EMAIL, changes: { semester: 6 } });
 
     expect(await harness.visibleFeedIds()).toEqual(['electivas-6', 'general']);
-    expect((await harness.profiles.findByEmail(EMAIL))?.directory.program).toBe('sistemas');
+    expect((await harness.profiles.findByEmail(EMAIL))?.directory.programId).toBe('sistemas');
   });
 
   it('bajar el semestre oculta la convocatoria dirigida al semestre anterior', async () => {

@@ -28,9 +28,9 @@ Se creó `src/contexts/profile/` en lugar de meterlo en `identity`:
 
 Es una regla de dominio verificada en tres niveles:
 
-1. **Compilación.** `StudentProfile.directory` es `DirectoryProjection { readonly email; readonly program }`, y `semester` es `readonly`. `tests/profile/StudentProfile.test.ts` contiene asignaciones marcadas con `// @ts-expect-error`. Si alguien quita un `readonly`, la directiva queda sin error que esperar y **`npm run typecheck` falla**. Se comprobó con una mutación: quitar `readonly` de `program` produce `TS2578: Unused '@ts-expect-error' directive`.
+1. **Compilación.** `StudentProfile.directory` es `DirectoryProjection { readonly email; readonly programId }`, y `semester` es `readonly`. `tests/profile/StudentProfile.test.ts` contiene asignaciones marcadas con `// @ts-expect-error`. Si alguien quita un `readonly`, la directiva queda sin error que esperar y **`npm run typecheck` falla**. Se comprobó con una mutación: quitar `readonly` del programa produce `TS2578: Unused '@ts-expect-error' directive`.
 2. **Ejecución.** La entidad y su proyección están congeladas (`Object.freeze`). La única vía de cambio del estudiante es `withSemester`, que devuelve un perfil nuevo. Solo `syncedWith`, invocado por la sincronización, cambia los campos del directorio.
-3. **Entrada sin tipo.** El cuerpo JSON de una petición futura no pasa por el compilador. `classifyProfileChanges` separa los campos del directorio (`name`, `email`, `program`, `studentId`), los editables (`semester`) y los desconocidos. `UpdateStudentProfile` rechaza **la petición completa** si trae cualquier campo del directorio, con el error `read-only-field` y el mensaje `DIRECTORY_CORRECTION_NOTICE`. Una petición mixta no aplica "lo que sí se podía".
+3. **Entrada sin tipo.** El cuerpo JSON de una petición futura no pasa por el compilador. `classifyProfileChanges` separa los campos del directorio (`name`, `email`, `program`, `programId`, `studentId`), los editables (`semester`) y los desconocidos. `UpdateStudentProfile` rechaza **la petición completa** si trae cualquier campo del directorio, con el error `read-only-field` y el mensaje `DIRECTORY_CORRECTION_NOTICE`. Una petición mixta no aplica "lo que sí se podía".
 
 ## Sincronización con el directorio
 
@@ -43,7 +43,7 @@ Es una regla de dominio verificada en tres niveles:
 
 Reglas de la sincronización (`StudentProfile.syncedWith`):
 
-- `email` y `program` siempre se toman del directorio.
+- `email` y el programa siempre se toman del directorio; el programa se guarda traducido a id del catálogo (ver corrección del bug 3).
 - El semestre tiene un origen (`semesterSource`). Si es `directory`, sigue al directorio en cada login: un estudiante que nunca editó avanza cuando el directorio avanza. Si es `student`, **se conserva** lo que editó el estudiante.
 - Un semestre del directorio fuera de rango no bloquea el login: queda desconocido (`null`).
 - Una vez editado, el semestre del estudiante prevalece siempre sobre el del directorio. Si más adelante se quiere que un cambio del directorio "gane" (por ejemplo, al cambiar de periodo), hará falta guardar el semestre del directorio en el momento de la edición. Queda fuera de alcance.
@@ -71,7 +71,7 @@ Reglas de la sincronización (`StudentProfile.syncedWith`):
 
 ## Minimización de datos (criterio 6)
 
-El documento de `student_profiles` contiene exactamente `_id` (correo), `program`, `semester`, `semesterSource`, `updatedAt` y `version`.
+El documento de `student_profiles` contiene exactamente `_id` (correo), `programId`, `semester`, `semesterSource`, `updatedAt` y `version`.
 
 - **No se guarda el nombre.** No segmenta. La vista lo toma de los datos frescos del directorio de la autenticación en curso, no de una copia persistida que podría envejecer.
 - **No se guarda `studentId`** ni ningún otro campo que el directorio agregue en el futuro. La proyección se copia campo a campo, nunca con `...record`, y hay una prueba que inyecta campos extra y verifica que no llegan ni a la entidad ni al documento.
@@ -86,14 +86,33 @@ El documento de `student_profiles` contiene exactamente `_id` (correo), `program
 
 ## Colección MongoDB
 
-- `student_profiles`: `_id = email` normalizado. Sin índices adicionales, porque todas las lecturas son por `_id`.
+- `student_profiles`: `_id = email` normalizado; `programId` es el id del catálogo o `null`. Sin índices adicionales, porque todas las lecturas son por `_id`.
 
 ## Gaps conocidos (fuera de esta historia)
 
 - **Nada produce todavía un `semesterRange` desde un correo real.** `ProgramTargetingResolver` (HU-07) no extrae semestres del texto, y además ni él ni `ProgramTargetingRepositoryPort.save` están conectados al flujo de ingesta en `src/`: hoy solo las pruebas guardan targeting. El mecanismo de HU-37 funciona de punta a punta en cuanto un registro tenga `semesterRange`, pero extraer el rango del texto ("de 6° semestre en adelante") es trabajo de una historia de clasificación o targeting.
-- **Desajuste entre programa del directorio y catálogo: confirmado con prueba.** `InMemoryIdentityProviderAdapter` devuelve `program: 'Ingeniería de Sistemas'` (nombre), mientras que `ProgramTargetingResolver` y `FacultyProgramResolver` trabajan con ids del catálogo (`sistemas`). Con el adaptador de identidad en memoria, el catálogo real y el resolver real, **una convocatoria dirigida a un programa o a una facultad nunca es visible para ningún estudiante**: solo llega el contenido para toda la comunidad, y ningún nombre de programa del catálogo coincide con ningún id. La prueba es `tests/regression/ProgramIdMismatch.test.ts`, marcada con `it.fails`: afirma el comportamiento correcto, hoy falla, y se pondrá en rojo cuando se corrija, momento en que hay que cambiarla a `it`. El problema es anterior a HU-37 y se resuelve en una historia aparte. Hoy no afecta a usuarios reales porque `RealIdentityProviderAdapter` no está conectado y el targeting no está cableado a la ingesta. La corrección debe decidir qué devuelve el directorio real y dónde se traduce a id del catálogo (probablemente al sincronizar el perfil).
-- **El arnés de pruebas de HU-37 usa `program: 'sistemas'` a propósito** (`tests/profile/profileHarness.ts`), para aislar el efecto del semestre. Por eso esas pruebas no detectan el desajuste anterior; esa es la función de la prueba de regresión.
+- **Desajuste entre programa del directorio y catálogo: corregido** (ver la sección siguiente). Confirmado primero con `tests/regression/ProgramIdMismatch.test.ts`, que ahora es un `it` normal y pasa.
 - No hay endpoint HTTP. La capa futura debe tomar el correo del sujeto de la sesión verificada, nunca del cuerpo de la petición.
+
+## Corrección: programa del directorio → id del catálogo (bug 3)
+
+Corrección técnica posterior a HU-37 (rama `correccion-bugs-integracion`), no una historia del backlog.
+
+**Problema (confirmado con prueba).** `InMemoryIdentityProviderAdapter` entrega `program: 'Ingeniería de Sistemas'` (nombre), mientras que `ProgramTargetingResolver` y `FacultyProgramResolver` dirigen las convocatorias con ids del catálogo (`sistemas`). Ninguna convocatoria dirigida a un programa o a una facultad le llegaba a ningún estudiante. `tests/regression/ProgramIdMismatch.test.ts` usa piezas reales: adaptador en memoria sin registrar cuentas, `config/program-catalog.json` y el resolver de HU-07. Estaba marcada con `it.fails`; al cambiarla a `it` falló por la visibilidad (`['general']` en lugar de los tres ids), y con la corrección pasa.
+
+**Dónde se traduce: al sincronizar el perfil.** `SyncStudentProfileFromDirectory` resuelve el programa mediante un puerto propio de `profile` (`ProgramCatalogPort`), implementado por `TargetingProgramCatalogAdapter` sobre el mismo catálogo del targeting. El perfil guarda **el id** en `DirectoryProjection.programId`, y el campo persistido pasó de `program` a `programId`, para que el tipo deje claro que ya no es texto del directorio. Se traduce en cada login, así que un programa que el catálogo agregue después queda reconocido en la siguiente autenticación.
+
+**Sin suponer el contrato del directorio real.** `ProgramCatalogMatcher` (en `targeting`) acepta **el id o el nombre**, comparados con la normalización que ya usaba `ProgramTargetingResolver` (sin tildes, minúsculas, sin puntuación, espacios colapsados). Esa normalización se extrajo tal cual a `CatalogTextNormalization.ts`. Si el directorio real entrega ids, funciona; si entrega nombres, también. Si entrega códigos (por ejemplo SNIES), basta agregarlos al catálogo, sin cambiar el código. Se eligió esta normalización y no la de `FacultyProgramResolver` porque aquella solo pasa a minúsculas y no reconocería "Ingenieria" sin tilde frente a "Ingeniería".
+
+**Programa no reconocido.** Si no hay coincidencia, o si es **ambigua** (dos programas con el mismo nombre normalizado), el perfil guarda `programId: null`. Consecuencias:
+- el segmento no lleva programa y el feed muestra **solo contenido de toda la comunidad**, marcado como `incompleteProfile` (el mismo mecanismo de HU-12 para programa ausente);
+- el login **no falla**;
+- la vista expone `readOnly.programRecognized: false` sin ocultar el nombre que dio el directorio;
+- el semestre editado se conserva.
+
+Se prefirió esto a adivinar: un programa equivocado mostraría convocatorias ajenas, que es peor que mostrar solo las generales.
+
+**Arnés.** `tests/profile/profileHarness.ts` sigue usando `program: 'sistemas'` para las pruebas de semestre; ahora pasa por la traducción como cualquier otro valor. `tests/profile/ProgramRecognition.test.ts` cubre nombre, no reconocido, ambigüedad y catálogo actualizado.
 
 ## Criterios de aceptación y pruebas
 

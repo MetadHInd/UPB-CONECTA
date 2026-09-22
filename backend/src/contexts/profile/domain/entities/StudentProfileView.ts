@@ -11,6 +11,12 @@ export interface StudentProfileView {
     readonly name: string;
     readonly email: string;
     readonly program: string;
+    /**
+     * `false` si el catalogo no reconoce el programa del directorio: el feed
+     * solo muestra contenido de toda la comunidad hasta que se corrija el
+     * catalogo o el dato en el directorio (correccion del bug 3).
+     */
+    readonly programRecognized: boolean;
     readonly directorySemester: number;
     readonly correctionNotice: string;
   };

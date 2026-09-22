@@ -14,7 +14,7 @@ describe('HU-37 — perfil del estudiante y semestre editable (RF-59, RF-60, RNF
       await harness.login();
 
       const stored = await harness.profiles.findByEmail(EMAIL);
-      expect(stored?.directory).toEqual({ email: EMAIL, program: 'sistemas' });
+      expect(stored?.directory).toEqual({ email: EMAIL, programId: 'sistemas' });
       expect(stored?.semester?.value).toBe(5);
       expect(stored?.semesterSource).toBe('directory');
     });
@@ -28,7 +28,7 @@ describe('HU-37 — perfil del estudiante y semestre editable (RF-59, RF-60, RNF
       await harness.login();
 
       const stored = await harness.profiles.findByEmail(EMAIL);
-      expect(stored?.directory.program).toBe('industrial');
+      expect(stored?.directory.programId).toBe('industrial');
       expect(stored?.semester?.value).toBe(8);
       expect(stored?.semesterSource).toBe('student');
     });
@@ -65,6 +65,7 @@ describe('HU-37 — perfil del estudiante y semestre editable (RF-59, RF-60, RNF
         name: 'Ana Gómez',
         email: EMAIL,
         program: 'sistemas',
+        programRecognized: true,
         directorySemester: 5,
         correctionNotice: DIRECTORY_CORRECTION_NOTICE
       });
@@ -116,7 +117,7 @@ describe('HU-37 — perfil del estudiante y semestre editable (RF-59, RF-60, RNF
         message: DIRECTORY_CORRECTION_NOTICE,
         fields: ['program', 'name']
       });
-      expect((await harness.profiles.findByEmail(EMAIL))?.directory.program).toBe('sistemas');
+      expect((await harness.profiles.findByEmail(EMAIL))?.directory.programId).toBe('sistemas');
     });
 
     it('rechaza la petición completa si mezcla un campo editable con uno de solo lectura', async () => {
@@ -216,7 +217,7 @@ describe('HU-37 — perfil del estudiante y semestre editable (RF-59, RF-60, RNF
       const stale = await harness.profiles.findByEmail(EMAIL);
       await harness.update.execute({ email: EMAIL, changes: { semester: 9 } });
 
-      const saved = await harness.profiles.save(stale!.syncedWith(DIRECTORY_PROFILE, harness.bounds, harness.now()));
+      const saved = await harness.profiles.save(stale!.syncedWith(DIRECTORY_PROFILE, 'sistemas', harness.bounds, harness.now()));
 
       expect(saved).toBe(false);
       expect((await harness.profiles.findByEmail(EMAIL))?.semester?.value).toBe(9);

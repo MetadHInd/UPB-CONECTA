@@ -7,14 +7,16 @@ import { ViewStudentProfile } from '../../src/contexts/profile/application/ViewS
 import type { StudentProfileRepositoryPort } from '../../src/contexts/profile/domain/ports/out/StudentProfileRepositoryPort.js';
 import { createSemesterBounds } from '../../src/contexts/profile/domain/value-objects/SemesterNumber.js';
 import { InMemoryStudentProfileRepository } from '../../src/contexts/profile/infrastructure/adapters/out/memory/InMemoryStudentProfileRepository.js';
+import { TargetingProgramCatalogAdapter } from '../../src/contexts/profile/infrastructure/integration/TargetingProgramCatalogAdapter.js';
 import { FeedStudentSegmentAdapter } from '../../src/contexts/profile/infrastructure/integration/FeedStudentSegmentAdapter.js';
 import { IdentityProfileSyncAdapter } from '../../src/contexts/profile/infrastructure/integration/IdentityProfileSyncAdapter.js';
 import { FacultyProgramResolver } from '../../src/contexts/targeting/domain/services/FacultyProgramResolver.js';
+import type { InstitutionalProgramCatalog } from '../../src/contexts/targeting/domain/ports/out/ProgramCatalogPort.js';
 import type { ProgramTargetingRecord } from '../../src/contexts/targeting/domain/ports/out/ProgramTargetingRepositoryPort.js';
 import { InMemoryProgramTargetingRepository } from '../../src/contexts/targeting/infrastructure/adapters/out/memory/InMemoryProgramTargetingRepository.js';
 import { buildSessionHarness, STUDENT } from '../identity/sessionHarness.js';
 
-export const CATALOG = {
+export const CATALOG: InstitutionalProgramCatalog = {
   faculties: [{ id: 'ingenieria', name: 'Facultad de Ingeniería', programIds: ['sistemas', 'industrial'] }],
   programs: [
     { id: 'sistemas', name: 'Ingeniería de Sistemas', facultyId: 'ingenieria' },
@@ -48,7 +50,10 @@ export function buildProfileHarness(options: { readonly profiles?: StudentProfil
   const bounds = createSemesterBounds(options.maxSemester ?? 12);
   let now = new Date('2026-09-22T12:00:00Z');
   const clock = { now: () => now };
-  const sync = new SyncStudentProfileFromDirectory({ profiles, clock, bounds });
+  // Copia mutable por prueba: algunas pruebas agregan o quitan programas.
+  const catalog = structuredClone(CATALOG) as { faculties: InstitutionalProgramCatalog['faculties']; programs: InstitutionalProgramCatalog['programs'] };
+  const programs = new TargetingProgramCatalogAdapter(catalog);
+  const sync = new SyncStudentProfileFromDirectory({ profiles, clock, bounds, programs });
   const identity = buildSessionHarness({ profileSync: new IdentityProfileSyncAdapter(sync) });
   identity.provider.register({ username: STUDENT.username, password: STUDENT.password, profile: DIRECTORY_PROFILE });
 
@@ -57,19 +62,20 @@ export function buildProfileHarness(options: { readonly profiles?: StudentProfil
   const segmentedFeed = new GetSegmentedFeed({
     convocatoriaRepo: convocatorias,
     programTargetingRepo: targeting,
-    facultyResolver: new FacultyProgramResolver(CATALOG)
+    facultyResolver: new FacultyProgramResolver(catalog)
   });
 
   return {
     profiles,
     bounds,
+    catalog,
     identity,
     sync,
     advanceDays(days: number) {
       now = new Date(now.getTime() + days * 86_400_000);
     },
     now: () => now,
-    view: new ViewStudentProfile({ profiles, bounds }),
+    view: new ViewStudentProfile({ profiles, bounds, programs }),
     update: new UpdateStudentProfile({ profiles, clock, bounds }),
     feed: new GetStudentFeed({ segments: new FeedStudentSegmentAdapter(profiles), feed: segmentedFeed }),
     async login() {

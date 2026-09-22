@@ -36,13 +36,13 @@ describe('MongoStudentProfileRepository (integración contra MongoDB real)', () 
   });
 
   it('criterio 6: el documento guardado solo tiene la clave y lo que segmenta', async () => {
-    await repository.save(StudentProfile.fromDirectory(DIRECTORY_PROFILE, BOUNDS, T0));
+    await repository.save(StudentProfile.fromDirectory(DIRECTORY_PROFILE, 'sistemas', BOUNDS, T0));
 
     const doc = await db.collection(COLLECTION).findOne({ _id: EMAIL as never });
 
     expect(doc).toEqual({
       _id: EMAIL,
-      program: 'sistemas',
+      programId: 'sistemas',
       semester: 5,
       semesterSource: 'directory',
       updatedAt: T0,
@@ -53,12 +53,12 @@ describe('MongoStudentProfileRepository (integración contra MongoDB real)', () 
   });
 
   it('recupera el perfil con su semestre, origen y versión', async () => {
-    const edited = StudentProfile.fromDirectory(DIRECTORY_PROFILE, BOUNDS, T0).withSemester(SemesterNumber.create(7, BOUNDS), T0);
+    const edited = StudentProfile.fromDirectory(DIRECTORY_PROFILE, 'sistemas', BOUNDS, T0).withSemester(SemesterNumber.create(7, BOUNDS), T0);
     await repository.save(edited);
 
     const found = await repository.findByEmail(EMAIL);
 
-    expect(found?.directory).toEqual({ email: EMAIL, program: 'sistemas' });
+    expect(found?.directory).toEqual({ email: EMAIL, programId: 'sistemas' });
     expect(found?.semester?.value).toBe(7);
     expect(found?.semesterSource).toBe('student');
     expect(found?.version).toBe(1);
@@ -66,7 +66,7 @@ describe('MongoStudentProfileRepository (integración contra MongoDB real)', () 
   });
 
   it('concurrencia optimista: dos inserciones del mismo perfil, solo una gana', async () => {
-    const profile = StudentProfile.fromDirectory(DIRECTORY_PROFILE, BOUNDS, T0);
+    const profile = StudentProfile.fromDirectory(DIRECTORY_PROFILE, 'sistemas', BOUNDS, T0);
 
     const results = await Promise.all([repository.save(profile), repository.save(profile)]);
 
@@ -74,16 +74,16 @@ describe('MongoStudentProfileRepository (integración contra MongoDB real)', () 
   });
 
   it('concurrencia optimista: una actualización con versión vieja no escribe', async () => {
-    await repository.save(StudentProfile.fromDirectory(DIRECTORY_PROFILE, BOUNDS, T0));
+    await repository.save(StudentProfile.fromDirectory(DIRECTORY_PROFILE, 'sistemas', BOUNDS, T0));
     const loaded = (await repository.findByEmail(EMAIL))!;
 
     expect(await repository.save(loaded.withSemester(SemesterNumber.create(8, BOUNDS), T0))).toBe(true);
-    expect(await repository.save(loaded.syncedWith(DIRECTORY_PROFILE, BOUNDS, T0))).toBe(false);
+    expect(await repository.save(loaded.syncedWith(DIRECTORY_PROFILE, 'sistemas', BOUNDS, T0))).toBe(false);
     expect((await repository.findByEmail(EMAIL))?.semester?.value).toBe(8);
   });
 
   it('un semestre guardado que queda fuera de un rango reducido se lee como desconocido', async () => {
-    await repository.save(StudentProfile.fromDirectory({ ...DIRECTORY_PROFILE, semester: 11 }, BOUNDS, T0));
+    await repository.save(StudentProfile.fromDirectory({ ...DIRECTORY_PROFILE, semester: 11 }, 'sistemas', BOUNDS, T0));
 
     const narrowed = new MongoStudentProfileRepository(db, createSemesterBounds(10), COLLECTION);
 

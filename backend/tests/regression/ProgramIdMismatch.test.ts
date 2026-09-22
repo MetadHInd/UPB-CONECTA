@@ -5,6 +5,7 @@ import { MessageId } from '../../src/contexts/ingestion/domain/value-objects/Mes
 import { SyncStudentProfileFromDirectory } from '../../src/contexts/profile/application/SyncStudentProfileFromDirectory.js';
 import { createSemesterBounds } from '../../src/contexts/profile/domain/value-objects/SemesterNumber.js';
 import { InMemoryStudentProfileRepository } from '../../src/contexts/profile/infrastructure/adapters/out/memory/InMemoryStudentProfileRepository.js';
+import { TargetingProgramCatalogAdapter } from '../../src/contexts/profile/infrastructure/integration/TargetingProgramCatalogAdapter.js';
 import { FeedStudentSegmentAdapter } from '../../src/contexts/profile/infrastructure/integration/FeedStudentSegmentAdapter.js';
 import { IdentityProfileSyncAdapter } from '../../src/contexts/profile/infrastructure/integration/IdentityProfileSyncAdapter.js';
 import { FacultyProgramResolver } from '../../src/contexts/targeting/domain/services/FacultyProgramResolver.js';
@@ -14,22 +15,25 @@ import { loadProgramCatalog } from '../../src/contexts/targeting/infrastructure/
 import { buildSessionHarness, STUDENT } from '../identity/sessionHarness.js';
 
 /**
- * REGRESIÓN PENDIENTE (confirmada en HU-37, se resuelve en una historia aparte).
+ * REGRESIÓN (confirmada en HU-37, corregida en la rama de corrección de bugs de integración).
  *
  * El directorio entrega el programa por nombre ('Ingeniería de Sistemas') y el
- * targeting usa ids del catálogo ('sistemas'), así que ninguna convocatoria
- * dirigida a un programa o a una facultad le llega a ningún estudiante.
- *
- * La prueba afirma el comportamiento CORRECTO y está marcada con `it.fails`:
- * hoy falla (bug presente) y por eso la suite queda en verde. Cuando se
- * traduzca el programa al id del catálogo, empezará a pasar, `it.fails` la
- * pondrá en rojo, y quien lo corrija debe cambiar `it.fails` por `it`.
+ * targeting usa ids del catálogo ('sistemas'). Antes de la corrección, ninguna
+ * convocatoria dirigida a un programa o a una facultad le llegaba a ningún
+ * estudiante. La sincronización del perfil ahora traduce el programa al id del
+ * catálogo (`TargetingProgramCatalogAdapter`); esta prueba, antes `it.fails`,
+ * fija ese comportamiento con piezas reales.
  */
 describe('REGRESIÓN — programa del directorio (nombre) vs. targeting (id)', () => {
-  it.fails('con piezas reales, un estudiante de Sistemas ve las convocatorias de Sistemas y de su facultad', async () => {
+  it('con piezas reales, un estudiante de Sistemas ve las convocatorias de Sistemas y de su facultad', async () => {
     const catalog = await loadProgramCatalog(); // config/program-catalog.json real
     const profiles = new InMemoryStudentProfileRepository();
-    const sync = new SyncStudentProfileFromDirectory({ profiles, clock: { now: () => new Date() }, bounds: createSemesterBounds(12) });
+    const sync = new SyncStudentProfileFromDirectory({
+      profiles,
+      clock: { now: () => new Date() },
+      bounds: createSemesterBounds(12),
+      programs: new TargetingProgramCatalogAdapter(catalog)
+    });
     // Adaptador de identidad en memoria con su cuenta POR DEFECTO (no se registra nada).
     const identity = buildSessionHarness({ profileSync: new IdentityProfileSyncAdapter(sync) });
     const login = await identity.authenticate.execute({ ...STUDENT, origin: '10.0.0.1' });
