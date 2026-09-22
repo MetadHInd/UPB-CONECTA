@@ -15,6 +15,9 @@ HU-37 — semestre en la segmentación
 - `FeedVisibilityPolicy.isVisible(targeting, student, semesters)` exige programa y, si la convocatoria tiene `semesterRange`, que el semestre del estudiante esté en el rango. El feed recibe `StudentSegment { program?, semester? }` en vez de `IdentityProfile`.
 - `GetStudentFeed` toma el segmento del perfil persistido (`StudentSegmentPort`), para que un semestre editado aplique en la siguiente carga. Es el punto de entrada que debe usar la capa HTTP. Detalle en `src/contexts/profile/README.md`.
 
+Corrección del bug 1 — lo no publicable no llega al feed
+- `GetSegmentedFeed` exige `classificationResultRepo` y `classificationRetryQueue` juntos. Oculta una convocatoria si su mensaje representativo tiene un registro `pending-review` o, sin registro, si está en la cola de reintento de clasificación (fallo del proveedor o descarte por regla de HU-09). Un mensaje que nunca pasó por el clasificador (histórico de HU-01 a HU-05) sigue visible. Un reenvío cuya reclasificación falla hereda el estado del representativo anterior, para que una convocatoria publicada no desaparezca por un fallo transitorio. Detalle y justificación en el README de `classification`; prueba: `tests/feed/UnpublishableClassificationExclusion.test.ts`.
+
 Gaps conocidos
 - Clasificación/temas no se materializa en la colección de convocatorias: si se desea indexar por `tema` habrá que duplicar los temas en el documento consolidado al momento de consolidar.
 - La resolución de targeting se hace consultando `program_targeting` por `messageId` y luego consultando `ingestion_consolidated_messages` por `representativeMessageId`.

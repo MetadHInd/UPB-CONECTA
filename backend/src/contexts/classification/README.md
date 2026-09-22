@@ -429,6 +429,44 @@ alerta al administrador es un stub que nadie lee: sería una retención
 silenciosa, justo lo que HU-10 quiere evitar. `main.ts` lo advierte en esa
 misma línea.
 
+### Corrección: el feed ya no publica lo que se intentó clasificar y no es publicable (bug 1)
+
+Corrección técnica posterior a HU-37 (rama `correccion-bugs-integracion`), no una historia del backlog.
+
+**Problema.** El feed solo ocultaba un mensaje con un registro `pending-review`. Un fallo del proveedor o un descarte por regla (HU-09) escriben en la cola de reintento **sin** registro de resultado, así que el feed los mostraba. Eso contradecía la garantía de HU-06 ("sin marcarlo como publicado ni listo para feed") y la semántica de "descartar". Prueba: `tests/feed/UnpublishableClassificationExclusion.test.ts`. Antes de la corrección, los casos de fallo y de descarte fallaban porque el mensaje aparecía visible.
+
+**Decisión: opción A.** El feed distingue:
+- "nunca se intentó clasificar": sin registro y fuera de la cola. Es el histórico de HU-01 a HU-05 y **sigue visible**;
+- "se intentó y no es publicable": en la cola, o con registro `pending-review`. **Se oculta**.
+
+`ClassificationRetryQueuePort` gana `contains(messageId)`. El registro de resultado manda sobre la cola: un mensaje que falló y luego se clasificó con éxito vuelve a verse.
+
+**Por qué no la opción B** (guardar siempre un `ClassificationResultRecord`, también al fallar o descartar): el registro exige `proposedCategory`, `finalCategory` y `confidenceScore`, y un fallo del proveedor no tiene ninguno. Habría que volverlos opcionales. Eso afecta a `ComputeClassificationPrecision` y `ComputeCoverageMetric`, que recorren `findAll()` y contarían fallos como clasificaciones, y reabre la decisión de HU-09 de no forzar una categoría ficticia. La opción A no toca el modelo de HU-09/HU-10.
+
+**Consecuencia que hubo que corregir: los reenvíos.** En un reenvío, el mensaje nuevo pasa a ser el representativo del grupo. Con la opción A sola, si el proveedor fallaba al reclasificar el reenvío, una convocatoria **ya publicada desaparecía** por un fallo transitorio. Ahora, ante un fallo del proveedor en un reenvío, `ClassifyInstitutionalMessage` guarda para el mensaje nuevo una copia del resultado del representativo anterior. Conserva el mismo estado, `reason` explica la herencia, y no hay alerta ni notificación porque el estado no cambia. La entrada en la cola se conserva para diagnóstico. Un **descarte por regla no hereda**, porque es una decisión explícita de revisión humana. Si el original tampoco tenía resultado, el reenvío queda oculto.
+
+**Cableado.** `GetSegmentedFeed` exige `classificationResultRepo` y `classificationRetryQueue` **juntos**, y lanza un error si llega solo uno: la mitad del cableado reabriría el bug en silencio.
+
+### Cola de reintento de clasificación: no tiene consumidor (hallazgo del bug 2)
+
+El prompt de la corrección suponía que un mensaje con clasificación fallida "queda reintentándose indefinidamente, ciclo tras ciclo". **En el código no es así.** `ClassificationRetryQueuePort` solo se escribe; ningún código de `src/` lee la cola para reintentar. El mensaje se marca como procesado en la ingesta aunque su clasificación falle, así que no vuelve a clasificarse. El problema real es el opuesto: la cola es un depósito sin salida, y sus mensajes quedan sin clasificar para siempre.
+
+Por eso **no se agregó contador de intentos a esta cola**: con cero reintentos, el umbral nunca se alcanzaría y sería código muerto. Con la corrección del bug 1, esos mensajes quedan **ocultos** del feed en vez de publicados, que es lo que HU-06 y HU-09 prometían ("revisión humana"). El bucle indefinido real estaba en el buzón; ver el README de `ingestion`.
+
+### Gap pendiente: umbral de reintentos de clasificación hacia cuarentena
+
+**Qué se pidió y qué se entregó.** El prompt de la corrección del bug 2 pedía un contador de intentos con umbral configurable hacia cuarentena **tanto para el buzón como para la clasificación**. **Solo se implementó para el buzón** (`INGESTION_MESSAGE_MAX_ATTEMPTS`). **Para la clasificación queda pendiente.**
+
+**Por qué.** Un umbral de reintentos presupone que algo reintenta, y la cola de clasificación no tiene consumidor. Agregar el contador hoy sería código muerto: nunca pasaría de 1.
+
+**Qué hace falta, en este orden (historia aparte):**
+1. Un **consumidor de la cola**: un proceso programado que lea `ClassificationRetryQueuePort`, reintente la clasificación con backoff y, si tiene éxito, guarde el `ClassificationResultRecord` (el feed ya lo mostrará, porque el registro manda sobre la cola). El puerto necesitará leer entradas pendientes, no solo `save` y `contains`.
+2. Recién entonces, un **contador de intentos por entrada** y un umbral propio (por ejemplo `CLASSIFICATION_RETRY_MAX_ATTEMPTS`), distinto del del buzón porque mide reintentos contra el proveedor de IA y no ciclos de ingesta.
+3. Qué hacer al agotar el umbral. La cuarentena de HU-04 (`QuarantineRepositoryPort`) está indexada por `mailboxUid` y guarda MIME crudo, así que probablemente no sea el destino correcto. Un estado "revisión humana definitiva" dentro de `classification` encaja mejor. Hay que decidirlo en esa historia.
+4. Las entradas que llegan por **descarte de regla** (`discardedByRuleId`) **no deben reintentarse**: el descarte es una decisión explícita, no un fallo. El consumidor debe filtrarlas.
+
+**Mientras tanto.** Los mensajes con clasificación fallida o descartada quedan en la cola indefinidamente, **ocultos del feed**, y nadie los revisa ni los reintenta. No se pierden (siguen en `classification_retry_queue`), pero tampoco llegan nunca a los estudiantes sin intervención manual.
+
 ### Criterios de aceptación y pruebas (HU-10)
 
 | Criterio | Descripción | Prueba correspondiente |

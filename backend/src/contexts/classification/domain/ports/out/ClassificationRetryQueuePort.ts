@@ -17,4 +17,10 @@ export interface ClassificationRetryEntry {
 
 export interface ClassificationRetryQueuePort {
   save(entry: ClassificationRetryEntry): Promise<void>;
+  /**
+   * Correccion del bug 1: `true` si el mensaje se intento clasificar y termino
+   * en esta cola (fallo del proveedor o descarte por regla). El feed lo usa
+   * para distinguir "se intento y no es publicable" de "nunca se clasifico".
+   */
+  contains(messageId: string): Promise<boolean>;
 }
