@@ -64,4 +64,27 @@ describe('MongoClassificationRetryQueue (integración contra MongoDB real)', () 
     });
     expect(saved?.message).toEqual(message);
   });
+
+  it('guardar dos veces el mismo messageId no falla: conserva el primer createdAt y actualiza el error', async () => {
+    const message: InstitutionalMessage = {
+      messageId: MessageId.fromHeader('<msg-dup@upb.edu.co>'),
+      mailboxUid: 7,
+      sender: 'sistemas@upb.edu.co',
+      subject: 'Aviso',
+      sentAt: new Date('2026-09-12T08:00:00Z'),
+      recipients: [],
+      body: 'Texto.',
+      attachments: []
+    };
+
+    await queue.save({ messageId: 'msg-dup', message, error: 'primer fallo', createdAt: new Date('2026-09-12T08:01:00Z') });
+    await queue.save({ messageId: 'msg-dup', message, error: 'segundo fallo', createdAt: new Date('2026-09-12T09:00:00Z') });
+
+    const documents = await db.collection(COLLECTION).find({ _id: 'msg-dup' as never }).toArray();
+    expect(documents).toHaveLength(1);
+    expect(documents[0]).toMatchObject({
+      error: 'segundo fallo',
+      createdAt: new Date('2026-09-12T08:01:00Z')
+    });
+  });
 });

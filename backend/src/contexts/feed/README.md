@@ -8,6 +8,9 @@ Alcance y límites
 - No se modifica la identidad de las convocatorias (ConvocatoriaId sigue siendo el _id del documento consolidado).
 - No se implementó validación end-to-end sobre redes móviles 4G; queda como trabajo pendiente.
 
+HU-10 — exclusión de documentos en revisión pendiente
+- `GetSegmentedFeed` acepta un `classificationResultRepo` opcional. Si se provee, una convocatoria cuyo `representativeMessageId` tiene `publicationStatus: 'pending-review'` se excluye del feed (prueba: `tests/feed/ReviewPendingExclusion.test.ts`). Sin registro de clasificación, la convocatoria se considera visible. Detalle y justificación en el README de `classification`, sección HU-10.
+
 Gaps conocidos
 - Clasificación/temas no se materializa en la colección de convocatorias: si se desea indexar por `tema` habrá que duplicar los temas en el documento consolidado al momento de consolidar.
 - La resolución de targeting se hace consultando `program_targeting` por `messageId` y luego consultando `ingestion_consolidated_messages` por `representativeMessageId`.

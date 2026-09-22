@@ -45,7 +45,7 @@ Este catálogo se usa como único origen de verdad para asignar la categoría y 
 ## Diferido explícitamente
 
 - Proveedor real de IA: no existe API ni acceso ni credenciales en este repositorio; se deja un adaptador en memoria como stub documentado.
-- Métrica de HU-10: la evaluación del clasificador y la medición de precisión sobre la clase de interés queda fuera de este alcance, según la propia historia.
+- Métrica de HU-10: la evaluación del clasificador y la medición de precisión sobre la clase de interés queda fuera de este alcance, según la propia historia. **Actualización:** el mecanismo de cálculo ya existe — ver la sección HU-10 más abajo.
 
 ## Criterios de aceptación y pruebas (HU-06)
 
@@ -80,7 +80,7 @@ expone HTTP todavía. Se deja el puerto de repositorio y los casos de uso
 listos para que una capa de administración futura los consuma directamente.
 Tampoco se implementa HU-10 (métrica del clasificador): la mejora de
 precisión que esta historia persigue se mide con esa métrica, fuera de este
-alcance.
+alcance. **Actualización:** implementada después — ver la sección HU-10.
 
 ### Diseño: Chain of Responsibility + Specification
 
@@ -213,3 +213,233 @@ alcance y se deja como extensión futura explícita.
 | 6 | Simulación de una regla candidata sobre el histórico, de solo lectura | `tests/classification/SimulatePostProcessingRule.test.ts` |
 | — | Decisión sobre "descartar" (no está en un criterio numerado, pero condiciona 1 y 2) | `tests/classification/ClassifyInstitutionalMessagePostProcessing.test.ts` (`decision sobre "descartar"...`) |
 | — | Dominio de reglas desacoplado de infraestructura | `npm run check:architecture` |
+
+## HU-10 — confianza, umbral de revisión y métricas del clasificador (RF-15, RNF-25, RNF-26, RNF-28. CU-01 paso 8 y flujo alternativo B)
+
+HU-06 y HU-09 dejaron la evaluación del clasificador "fuera de alcance, se
+cierra con la métrica de HU-10". Esta es esa historia.
+
+### Alcance
+
+- Cada clasificación lleva un **puntaje de confianza** (`ConfidenceScore`) que
+  se persiste junto al documento (`ClassificationResultRecord.confidenceScore`).
+- Un **umbral configurable** (`ReviewThreshold`, leído en cada ejecución desde
+  `ReviewThresholdConfigPort`) decide si el documento se **publica** o queda en
+  **revisión pendiente** (`ClassificationResultRecord.publicationStatus`).
+- La decisión es **política de dominio pura**
+  (`domain/services/PublicationDecisionPolicy.ts`, `decidePublicationStatus`):
+  recibe `ConfidenceScore` y `ReviewThreshold` y devuelve la decisión, sin I/O.
+- Revisión pendiente → alerta al administrador (`AdminAlertPort`) y **exclusión
+  del feed**. Publicado → se programan sus notificaciones
+  (`NotificationSchedulingPort`).
+- Casos de uso puros de **precisión** (`ComputeClassificationPrecision`) y
+  **cobertura** (`ComputeCoverageMetric`) sobre una muestra etiquetada
+  (`LabeledSampleRepositoryPort`).
+
+No se implementa interfaz de administración, sistema de notificaciones
+completo ni corpus de datos reales (ver gaps más abajo).
+
+### Value objects y convenciones
+
+- `ConfidenceScore` y `ReviewThreshold`: número real en **[0, 1]** (como una
+  probabilidad), validado en el constructor (`TypeError` fuera de rango, `NaN`
+  o infinito), igual que `ClassificationResult` valida sus categorías.
+- **Límite exacto** (criterios 2 y 3): puntaje **estrictamente menor** al umbral
+  → revisión pendiente; **igual o mayor** → publicado.
+- `ReviewThreshold.default()` = **0.6**: punto de partida documentado, **no**
+  calibrado. La nota metodológica de la historia es explícita en que no hay
+  datos de referencia en la literatura; el valor correcto debe ajustarlo un
+  administrador a partir de las métricas reales.
+- `ConfidenceScore.certain()` = 1: valor por defecto cuando un
+  `ClassificationResult` se construye sin puntaje (código anterior a HU-10).
+  Asumir certeza total reproduce exactamente el comportamiento previo, donde
+  todo se publicaba.
+
+### De dónde sale el puntaje
+
+`ClassificationPort` ya devuelve un `ClassificationResult`; ese resultado ahora
+incluye `confidenceScore`. `InMemoryClassificationAdapter` (el stub de HU-06)
+asigna un valor **determinista**, nunca aleatorio: **0.9** cuando un patrón
+específico coincidió y **0.4** cuando el mensaje cae en "boletín informativo"
+por defecto porque ningún patrón coincidió. Ese es justamente el caso que HU-10
+quiere hacer visible en lugar de publicarlo sin avisar. El puntaje real dependerá
+del proveedor de IA cuando exista, el mismo límite ya documentado para la
+categoría en HU-06.
+
+Las reglas de posprocesamiento de HU-09 cambian la **categoría**, no la
+**confianza del modelo**: al confirmar o corregir, `ClassifyInstitutionalMessage`
+conserva el `confidenceScore` original. Antes de este cambio, reconstruir el
+resultado con `fromCategory` lo reiniciaba de forma silenciosa a 1.
+
+### Gap 1 — dónde vive el estado "publicado / revisión pendiente"
+
+No existía ningún estado de publicación: el feed leía
+`ingestion_consolidated_messages` sin ningún filtro de revisión. **Decisión:**
+el estado vive en `ClassificationResultRecord.publicationStatus`
+(`'published' | 'pending-review'`), no en un repositorio separado. Motivo: el
+documento se persiste igual en ambos casos, porque el criterio 7 exige que sea
+auditable, y en ese mismo registro ya están el puntaje, la categoría propuesta
+y la regla aplicada. Un registro aparte duplicaría esa información.
+
+El **feed excluye explícitamente** lo que está en revisión pendiente, no solo
+el cliente: `GetSegmentedFeed` recibe un `classificationResultRepo` opcional y,
+por cada convocatoria, consulta
+`findByMessageId(representativeMessageId)`. Si el estado es `pending-review`, la
+omite (`tests/feed/ReviewPendingExclusion.test.ts`, mismo estilo que
+`tests/ingestion/QuarantineExclusion.test.ts`). Una convocatoria **sin registro
+de clasificación** se considera visible, con el mismo criterio permisivo que
+`GetSegmentedFeed` ya aplica cuando falta el targeting. Ocultar de forma
+retroactiva todo lo ingerido antes de HU-10 sería un cambio de comportamiento
+fuera de alcance.
+
+Para esto `ClassificationResultRepositoryPort` gana `findByMessageId` y
+`findAll`, y `MongoClassificationResultRepository` gana `ensureIndexes`
+(índice único `idx_message_id`).
+
+### Gap 2 — alertas al administrador y programación de notificaciones
+
+El contexto `notifications` solo gestiona preferencias y dispositivos: no
+tiene ningún caso de uso para "enviar" o "programar" contenido. **No se
+construyó ese sistema aquí.** En su lugar hay dos puertos mínimos en
+`classification`:
+
+- `AdminAlertPort.notifyPendingReview(record)` (criterio 2).
+- `NotificationSchedulingPort.scheduleForPublication(record)` (criterio 3).
+
+Sus adaptadores (`InMemoryAdminAlertPort`, `InMemoryNotificationSchedulingPort`)
+son **stubs explícitos** que solo registran la llamada, marcados con `TODO`.
+Sirven como doble de prueba y como marcador de producción, igual que
+`InMemoryClassificationAdapter` e `InMemoryMailboxAdapter`. No hay plantillas,
+contenido ni entrega push; eso pertenece a otra historia.
+
+### Gap 3 — no existe muestra etiquetada del piloto
+
+Los criterios 5 y 6 comparan contra una verdad de referencia etiquetada por
+humanos, y **esa muestra no existe en este repositorio**. Quién etiqueta, con
+qué proceso y sobre qué periodo de validación es responsabilidad de otro
+proceso fuera de este alcance. `LabeledSampleRepositoryPort` (en memoria y
+Mongo, colección `classification_labeled_samples`) solo **persiste** pares
+`(messageId, actualCategory)` ya etiquetados; no los genera ni los valida.
+
+`ComputeClassificationPrecision` y `ComputeCoverageMetric` son **casos de uso
+puros**: reciben los registros y la muestra ya cargados (por ejemplo, con
+`ClassificationResultRepositoryPort.findAll()` y
+`LabeledSampleRepositoryPort.findAll()`) y devuelven el porcentaje. Se prueban
+con fixtures sintéticas.
+
+- **Precisión** (criterio 5): entre los documentos **publicados** con categoría
+  final X **que tienen etiqueta humana**, qué proporción es realmente X. Los
+  documentos en revisión pendiente no se publicaron, así que no cuentan. Un
+  publicado sin etiqueta no puede contar ni a favor ni en contra.
+- **Cobertura** (criterio 6): entre los documentos que **realmente** son X según
+  la muestra, qué proporción se clasificó como X **y además se publicó**. Uno
+  retenido en revisión, mal clasificado o sin clasificar no llegó al
+  estudiante.
+- Sin datos evaluables, el resultado es `null` y `meetsMinimum: false`: no se
+  afirma que el umbral se cumple.
+
+> **Importante: implementar cómo calcular la métrica no confirma que el
+> clasificador ya cumpla 80 % / 90 % en producción.** El entregable de esta
+> historia es el **mecanismo de cálculo**. Verificar esos umbrales requiere un
+> piloto real con una muestra etiquetada que no existe en este entorno. Las
+> cifras de las pruebas vienen de fixtures sintéticas y no son resultados
+> empíricos.
+
+### Conexión con la ingesta real (corrección técnica posterior a HU-10)
+
+Hasta HU-10, `IngestInstitutionalMessages.consolidate()` clasificaba por su
+cuenta con una copia de la lógica de HU-06: no aplicaba las reglas de HU-09 ni
+el umbral de HU-10, y `main.ts` no conectaba ningún clasificador. Esa copia se
+eliminó. La ingesta ahora recibe una sola dependencia opcional,
+`classifyMessage?: ClassifyInstitutionalMessage`, y delega en ella. Detalle
+en el README de `ingestion`.
+
+- **Reloj inyectado:** `ClassifyInstitutionalMessage` recibe un `ClockPort`
+  **obligatorio** (propio de este contexto, igual que `ingestion`, `consent` y
+  `notifications`) para `persistedAt` y `createdAt`, en lugar de `new Date()`.
+  Es obligatorio y no opcional porque un reloj por defecto al del sistema
+  volvería no deterministas los tiempos justo en el camino que ahora recorre
+  la ingesta real. `ClassificationResult.toPersistedRecord` conserva su
+  parámetro por defecto `new Date()` para quien lo llame sin fecha, pero el
+  caso de uso siempre le pasa la del reloj.
+- **Política de reenvíos:** ver la sección siguiente.
+- **Cola de reintento idempotente:** `MongoClassificationRetryQueue.save` usa
+  upsert por `_id` (conserva el `createdAt` del primer intento y actualiza el
+  error), en vez de `insertOne`. Antes, si la ingesta se interrumpía después
+  de guardar en la cola y antes de `markAsProcessed`, el mensaje se releía, el
+  insert fallaba por clave duplicada en cada ciclo y el lote quedaba detenido
+  para siempre. Esto se vuelve realista con una regla de descarte de HU-09,
+  que se repite de forma determinista. El doble en memoria tiene la misma
+  semántica.
+- **`main.ts` conecta la clasificación completa:** clasificador simulado de
+  HU-06, repositorios Mongo de resultados, cola de reintento, reglas y umbral,
+  y los stubs de alerta y notificaciones, con `ensureIndexes` de resultados y
+  reglas. La colección del umbral y la cola de reintento se consultan por
+  `_id`, así que no necesitan índice adicional.
+
+### Política de reenvíos (opción B)
+
+HU-03 consolida los reenvíos de una convocatoria en un mismo grupo, pero
+`consolidate()` se ejecuta una vez por cada mensaje que llega. Se evaluaron
+tres opciones:
+
+- **A — clasificar y notificar solo el primer mensaje del grupo.**
+  **Descartada por un bug concreto:** en cada reenvío, el grupo cambia su
+  `representativeMessageId` al mensaje nuevo, y el feed (HU-10) busca el
+  estado de publicación por ese id. Si el reenvío no se clasifica, no tiene
+  registro, el feed lo trata como visible, y una convocatoria en revisión
+  pendiente **reaparecería en el feed con el primer recordatorio**.
+- **B — clasificar siempre, pero alertar o notificar solo cuando el estado de
+  publicación del grupo cambia. Elegida.** Cada representativo tiene su
+  registro (el feed sigue siendo correcto) y un reenvío corregido sí se
+  refleja en la clasificación.
+- **C — clasificar y notificar siempre.** Descartada: produce exactamente los
+  avisos duplicados que la deduplicación de HU-03 existe para evitar.
+
+Implementación: la decisión es política de dominio pura,
+`decidePublicationNotification(anterior, actual)`
+(`domain/services/PublicationNotificationPolicy.ts`). `anterior` es el estado
+del `representativeMessageId` previo del grupo, que la ingesta pasa como
+`execute(mensaje, previousMessageId)`.
+
+| Estado anterior | Estado actual | Acción |
+|---|---|---|
+| ninguno | `published` | programar notificaciones |
+| ninguno | `pending-review` | alertar al administrador |
+| igual al actual | igual | nada |
+| `pending-review` | `published` | programar notificaciones |
+| `published` | `pending-review` | alertar al administrador |
+
+"Ninguno" incluye un grupo nuevo y un grupo cuyo representativo anterior no
+tiene registro (su clasificación falló o una regla la descartó), porque nada
+se avisó todavía. Límite conocido: la política mira **solo el estado de
+publicación**. Si un reenvío cambia la categoría (por ejemplo, de boletín a
+convocatoria con plazo) sin cambiar el estado, el registro y el feed se
+actualizan, pero no se vuelve a notificar.
+
+### Riesgo antes de conectar el buzón real
+
+Con los mensajes de prueba de `main.ts`, el boletín de bienestar queda en 0.4 y
+por lo tanto en revisión pendiente, como se verificó arrancando `main.ts`
+contra MongoDB. Hoy eso no tiene efecto externo: el buzón y los stubs de
+alerta y notificaciones son simulados. **Al sustituir el buzón por el cliente
+IMAP real** hay que revisar también la clasificación. Con correo real, el
+clasificador simulado retendría en revisión todo lo que no reconoce, y la
+alerta al administrador es un stub que nadie lee: sería una retención
+silenciosa, justo lo que HU-10 quiere evitar. `main.ts` lo advierte en esa
+misma línea.
+
+### Criterios de aceptación y pruebas (HU-10)
+
+| Criterio | Descripción | Prueba correspondiente |
+|---|---|---|
+| 1 | Puntaje de confianza numérico persistido junto al documento | `tests/classification/ClassifyInstitutionalMessageReviewThreshold.test.ts` (`criterio 1: ...`), `tests/infrastructure/mongo/MongoClassificationResultRepository.integration.test.ts` (`HU-10: persiste puntaje...`) |
+| 2 | Bajo el umbral: no se publica, queda en revisión pendiente y se alerta al administrador | `tests/classification/PublicationDecisionPolicy.test.ts` (`criterio 2`), `tests/classification/ClassifyInstitutionalMessageReviewThreshold.test.ts` (`criterio 2: ...`), `tests/feed/ReviewPendingExclusion.test.ts` |
+| 3 | Sobre el umbral: se publica y se programan sus notificaciones | `tests/classification/PublicationDecisionPolicy.test.ts` (`criterio 3`, `limite exacto`), `tests/classification/ClassifyInstitutionalMessageReviewThreshold.test.ts` (`criterio 3: ...`) |
+| 4 | Ajustar el umbral aplica a las siguientes clasificaciones sin redespliegue | `tests/classification/ClassifyInstitutionalMessageReviewThreshold.test.ts` (`criterio 4: ...`), `tests/infrastructure/mongo/MongoReviewThresholdAndLabeledSample.integration.test.ts` (`criterio 4: ...`) |
+| 5 | Precisión ≥ 80 % sobre los publicados como convocatoria con plazo (**mecanismo**, no resultado real) | `tests/classification/ClassificationMetrics.test.ts` (`ComputeClassificationPrecision`) |
+| 6 | Cobertura ≥ 90 % de las convocatorias con plazo del buzón (**mecanismo**, no resultado real) | `tests/classification/ClassificationMetrics.test.ts` (`ComputeCoverageMetric`) |
+| 7 | Un documento publicado conserva categoría propuesta, puntaje y regla aplicada | `tests/classification/ClassifyInstitutionalMessageReviewThreshold.test.ts` (`criterio 7: ...`, corrección y confirmación) |
+| — | `ConfidenceScore`/`ReviewThreshold` validan su rango | `tests/classification/PublicationDecisionPolicy.test.ts` |
+| — | Puntaje determinista del stub (decisión 5) | `tests/classification/ClassifyInstitutionalMessageReviewThreshold.test.ts` (`decision 5: ...`) |
+| — | Dominio desacoplado de infraestructura | `npm run check:architecture` |

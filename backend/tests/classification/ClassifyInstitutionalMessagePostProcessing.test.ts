@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MessageId } from '../../src/contexts/ingestion/domain/value-objects/MessageId.js';
 import type { InstitutionalMessage } from '../../src/contexts/ingestion/domain/entities/InstitutionalMessage.js';
 import { ClassifyInstitutionalMessage } from '../../src/contexts/classification/application/ClassifyInstitutionalMessage.js';
+import { SystemClock } from '../../src/contexts/classification/infrastructure/adapters/out/memory/SystemClock.js';
 import { ClassificationResult } from '../../src/contexts/classification/domain/entities/ClassificationResult.js';
 import { MessageCategory } from '../../src/contexts/classification/domain/value-objects/MessageCategory.js';
 import type { PostProcessingRuleData } from '../../src/contexts/classification/domain/rules/PostProcessingRuleData.js';
@@ -39,6 +40,7 @@ describe('HU-09 — posprocesamiento integrado en ClassifyInstitutionalMessage',
     });
 
     const useCase = new ClassifyInstitutionalMessage({
+      clock: new SystemClock(),
       classificationPort: {
         classify: async () => ClassificationResult.fromCategory(MessageCategory.CONVOCATORIA_CON_PLAZO)
       },
@@ -73,6 +75,7 @@ describe('HU-09 — posprocesamiento integrado en ClassifyInstitutionalMessage',
     });
 
     const useCase = new ClassifyInstitutionalMessage({
+      clock: new SystemClock(),
       classificationPort: {
         classify: async () => ClassificationResult.fromCategory(MessageCategory.CONVOCATORIA_CON_PLAZO)
       },
@@ -99,6 +102,7 @@ describe('HU-09 — posprocesamiento integrado en ClassifyInstitutionalMessage',
     });
 
     const useCase = new ClassifyInstitutionalMessage({
+      clock: new SystemClock(),
       classificationPort: {
         classify: async () => ClassificationResult.fromCategory(MessageCategory.CONVOCATORIA_CON_PLAZO)
       },
@@ -132,6 +136,7 @@ describe('HU-09 — posprocesamiento integrado en ClassifyInstitutionalMessage',
     });
 
     const useCase = new ClassifyInstitutionalMessage({
+      clock: new SystemClock(),
       classificationPort: {
         classify: async () => ClassificationResult.fromCategory(MessageCategory.EVENTO)
       },
@@ -151,6 +156,7 @@ describe('HU-09 — posprocesamiento integrado en ClassifyInstitutionalMessage',
     const ruleRepository = new InMemoryPostProcessingRuleRepository();
 
     const useCase = new ClassifyInstitutionalMessage({
+      clock: new SystemClock(),
       classificationPort: {
         classify: async () => ClassificationResult.fromCategory(MessageCategory.CONVOCATORIA_CON_PLAZO)
       },
@@ -200,6 +206,7 @@ describe('HU-09 — posprocesamiento integrado en ClassifyInstitutionalMessage',
   it('no rompe el flujo existente de HU-06 cuando no se provee ruleRepository', async () => {
     const resultRepository = new InMemoryClassificationResultRepository();
     const useCase = new ClassifyInstitutionalMessage({
+      clock: new SystemClock(),
       classificationPort: {
         classify: async () => ClassificationResult.fromCategory(MessageCategory.EVENTO)
       },

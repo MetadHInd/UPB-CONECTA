@@ -14,9 +14,7 @@ import type { ClockPort } from '../domain/ports/out/ClockPort.js';
 import type { IngestInstitutionalMessagesPort } from '../domain/ports/in/IngestInstitutionalMessagesPort.js';
 import type { MessageNormalizerPort } from '../domain/ports/out/MessageNormalizerPort.js';
 import type { DueDateExtractorPort } from '../domain/ports/out/DueDateExtractorPort.js';
-import type { ClassificationPort } from '../../classification/domain/ports/out/ClassificationPort.js';
-import type { ClassificationRetryQueuePort } from '../../classification/domain/ports/out/ClassificationRetryQueuePort.js';
-import type { ClassificationResultRepositoryPort } from '../../classification/domain/ports/out/ClassificationResultRepositoryPort.js';
+import type { ClassifyInstitutionalMessage } from '../../classification/application/ClassifyInstitutionalMessage.js';
 
 export interface IngestInstitutionalMessagesDependencies {
   readonly mailbox: MailboxIngestionPort;
@@ -31,9 +29,11 @@ export interface IngestInstitutionalMessagesDependencies {
   readonly quarantineIncidentPolicy: QuarantineIncidentPolicy;
   readonly normalizer: MessageNormalizerPort;
   readonly dueDateExtractor: DueDateExtractorPort;
-  readonly classifier?: ClassificationPort;
-  readonly classificationRetryQueue?: ClassificationRetryQueuePort;
-  readonly classificationResultRepository?: ClassificationResultRepositoryPort;
+  /**
+   * Clasificacion completa (HU-06 + reglas de HU-09 + umbral de HU-10).
+   * Opcional: sin ella la ingesta consolida sin clasificar.
+   */
+  readonly classifyMessage?: ClassifyInstitutionalMessage;
   readonly clock: ClockPort;
   readonly batchSize: number;
 }
@@ -134,17 +134,8 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
    * documento nuevo, se consolida en el existente, o se actualiza su cuerpo.
    */
   private async consolidate(message: RawInstitutionalMessage): Promise<void> {
-    const {
-      normalizer,
-      deduplication,
-      deduplicationWindowMs,
-      consolidatedRegistry,
-      dueDateExtractor,
-      classifier,
-      classificationRetryQueue,
-      classificationResultRepository,
-      clock
-    } = this.deps;
+    const { normalizer, deduplication, deduplicationWindowMs, consolidatedRegistry, dueDateExtractor, classifyMessage } =
+      this.deps;
     const normalized = normalizer.normalize(message);
     const decision = await deduplication.decide(normalized, deduplicationWindowMs);
     // HU-08: se interpreta siempre sobre el cuerpo del mensaje entrante, no
@@ -152,25 +143,14 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
     // corregida o el enlace de postulacion que el aviso original omitio.
     const { dueDate, applicationLink } = dueDateExtractor.extract(normalized);
 
-    if (classifier) {
-      try {
-        const result = await classifier.classify(normalized);
-        if (classificationResultRepository) {
-          await classificationResultRepository.save(
-            result.toPersistedRecord(normalized.messageId.toString(), clock.now())
-          );
-        }
-      } catch (error) {
-        if (classificationRetryQueue) {
-          await classificationRetryQueue.save({
-            messageId: normalized.messageId.toString(),
-            message: normalized,
-            error: error instanceof Error ? error.message : String(error),
-            createdAt: clock.now()
-          });
-        }
-      }
-    }
+    // Politica de reenvios: se clasifica siempre, porque este mensaje pasa a
+    // ser el `representativeMessageId` del grupo y el feed (HU-10) lee el
+    // estado de publicacion de ese mensaje. Con el representativo anterior,
+    // `ClassifyInstitutionalMessage` solo alerta o notifica si el estado cambia.
+    // Un fallo del clasificador termina en su cola de reintento sin
+    // interrumpir el lote.
+    const previousMessageId = decision.kind === 'new' ? null : (decision.existing.representativeMessageId ?? null);
+    await classifyMessage?.execute(normalized, previousMessageId);
 
     if (decision.kind === 'new') {
       await consolidatedRegistry.save({
