@@ -3,6 +3,7 @@ import { LogoutSession } from '../../src/contexts/identity/application/LogoutSes
 import { RefreshSession } from '../../src/contexts/identity/application/RefreshSession.js';
 import { SessionTokenIssuer } from '../../src/contexts/identity/application/SessionTokenIssuer.js';
 import { VerifyAccessToken } from '../../src/contexts/identity/application/VerifyAccessToken.js';
+import type { AuthenticatedProfileSyncPort } from '../../src/contexts/identity/domain/ports/out/AuthenticatedProfileSyncPort.js';
 import type { RefreshTokenRepositoryPort } from '../../src/contexts/identity/domain/ports/out/RefreshTokenRepositoryPort.js';
 import { SessionPolicy } from '../../src/contexts/identity/domain/value-objects/SessionPolicy.js';
 import { RandomSessionIdGenerator } from '../../src/contexts/identity/infrastructure/adapters/out/crypto/RandomSessionIdGenerator.js';
@@ -17,6 +18,9 @@ import { readSessionConfig } from '../../src/contexts/identity/infrastructure/co
 export const TEST_SIGNING_SECRET = 'secreto-de-pruebas-hu45-con-mas-de-32-caracteres';
 export const STUDENT = { username: 'estudiante@upb.edu.co', password: 'S3cr3t!UPB' };
 
+/** Sincronización de perfil que no hace nada: las pruebas de sesión no la observan. */
+export const ignoreProfileSync: AuthenticatedProfileSyncPort = { syncFromDirectory: async () => undefined };
+
 /**
  * Cablea el flujo completo de sesion con el adaptador JWT real (firma real,
  * no un doble) y un reloj manual para mover el tiempo en las pruebas.
@@ -26,6 +30,7 @@ export function buildSessionHarness(
     readonly env?: NodeJS.ProcessEnv;
     readonly refreshTokens?: RefreshTokenRepositoryPort;
     readonly start?: Date;
+    readonly profileSync?: AuthenticatedProfileSyncPort;
   } = {}
 ) {
   const config = readSessionConfig({ SESSION_SIGNING_SECRET: TEST_SIGNING_SECRET, ...options.env });
@@ -34,6 +39,7 @@ export function buildSessionHarness(
   const refreshTokens = options.refreshTokens ?? new InMemoryRefreshTokenRepository();
   const audit = new InMemorySecurityAuditLog();
   const policy = SessionPolicy.create(config);
+  const provider = new InMemoryIdentityProviderAdapter();
   const sessions = new SessionTokenIssuer({ signer, refreshTokens, clock, ids: new RandomSessionIdGenerator(), policy });
 
   return {
@@ -44,10 +50,12 @@ export function buildSessionHarness(
     audit,
     policy,
     sessions,
+    provider,
     authenticate: new AuthenticateStudent({
-      provider: new InMemoryIdentityProviderAdapter(),
+      provider,
       rateLimiter: new InMemoryRateLimiter(),
-      sessions
+      sessions,
+      profileSync: options.profileSync ?? ignoreProfileSync
     }),
     refresh: new RefreshSession({ signer, refreshTokens, audit, clock, sessions }),
     verifyAccess: new VerifyAccessToken({ signer, refreshTokens, audit, clock }),

@@ -13,4 +13,8 @@ export class InMemoryClassificationRetryQueue implements ClassificationRetryQueu
     }
     this.items.push(entry);
   }
+
+  async contains(messageId: string): Promise<boolean> {
+    return this.items.some((item) => item.messageId === messageId);
+  }
 }

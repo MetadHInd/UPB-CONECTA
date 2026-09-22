@@ -8,6 +8,7 @@ describe('readIngestionConfig, criterio de aceptacion 2', () => {
     expect(config.batchSize).toBe(200);
     expect(config.deduplicationWindowMs).toBe(2_592_000_000);
     expect(config.quarantineIncidentThresholdRatio).toBe(0.2);
+    expect(config.messageMaxAttempts).toBe(3);
   });
 
   it('toma el intervalo del entorno sin recompilar', () => {
@@ -34,6 +35,13 @@ describe('readIngestionConfig, criterio de aceptacion 2', () => {
     expect(() => readIngestionConfig({ QUARANTINE_INCIDENT_THRESHOLD_RATIO: '1.5' })).toThrow(InvalidIngestionConfigError);
     expect(() => readIngestionConfig({ QUARANTINE_INCIDENT_THRESHOLD_RATIO: '-0.1' })).toThrow(InvalidIngestionConfigError);
     expect(() => readIngestionConfig({ QUARANTINE_INCIDENT_THRESHOLD_RATIO: 'alto' })).toThrow(InvalidIngestionConfigError);
+  });
+
+  it('bug 2: toma del entorno el máximo de ciclos fallidos por mensaje antes de la cuarentena', () => {
+    expect(readIngestionConfig({}).messageMaxAttempts).toBe(3);
+    expect(readIngestionConfig({ INGESTION_MESSAGE_MAX_ATTEMPTS: '5' }).messageMaxAttempts).toBe(5);
+    expect(() => readIngestionConfig({ INGESTION_MESSAGE_MAX_ATTEMPTS: '0' })).toThrow(InvalidIngestionConfigError);
+    expect(() => readIngestionConfig({ INGESTION_MESSAGE_MAX_ATTEMPTS: 'muchos' })).toThrow(InvalidIngestionConfigError);
   });
 
   it('rechaza un intervalo por debajo del minimo que protege al buzon', () => {

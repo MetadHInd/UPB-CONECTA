@@ -24,4 +24,9 @@ export class MongoClassificationRetryQueue implements ClassificationRetryQueuePo
       { upsert: true }
     );
   }
+
+  /** Busqueda por `_id`: no necesita indice propio. */
+  async contains(messageId: string): Promise<boolean> {
+    return (await this.collection.countDocuments({ _id: messageId }, { limit: 1 })) > 0;
+  }
 }

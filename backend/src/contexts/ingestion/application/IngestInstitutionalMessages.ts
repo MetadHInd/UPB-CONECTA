@@ -10,6 +10,7 @@ import type { ConsolidatedMessageRegistryPort } from '../domain/ports/out/Consol
 import type { QuarantineRepositoryPort } from '../domain/ports/out/QuarantineRepositoryPort.js';
 import type { IngestionCursorRepositoryPort } from '../domain/ports/out/IngestionCursorRepositoryPort.js';
 import type { IngestionRunLogRepositoryPort } from '../domain/ports/out/IngestionRunLogRepositoryPort.js';
+import type { MessageFailureRepositoryPort } from '../domain/ports/out/MessageFailureRepositoryPort.js';
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
 import type { IngestInstitutionalMessagesPort } from '../domain/ports/in/IngestInstitutionalMessagesPort.js';
 import type { MessageNormalizerPort } from '../domain/ports/out/MessageNormalizerPort.js';
@@ -34,6 +35,16 @@ export interface IngestInstitutionalMessagesDependencies {
    * Opcional: sin ella la ingesta consolida sin clasificar.
    */
   readonly classifyMessage?: ClassifyInstitutionalMessage;
+  /**
+   * Correccion del bug 2: tras `maxAttempts` ciclos fallidos sobre el mismo
+   * mensaje, se deriva a cuarentena (HU-04) y el cursor lo deja atras. Sin
+   * esta politica, un mensaje que falla siempre bloquea el buzon para siempre.
+   * Opcional como `classifyMessage`; `main.ts` la cablea.
+   */
+  readonly poisonMessages?: {
+    readonly failures: MessageFailureRepositoryPort;
+    readonly maxAttempts: number;
+  };
   readonly clock: ClockPort;
   readonly batchSize: number;
 }
@@ -49,6 +60,10 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
   constructor(private readonly deps: IngestInstitutionalMessagesDependencies) {
     if (!Number.isInteger(deps.batchSize) || deps.batchSize <= 0) {
       throw new RangeError(`El tamano de lote debe ser un entero positivo, se recibio ${deps.batchSize}`);
+    }
+    const maxAttempts = deps.poisonMessages?.maxAttempts;
+    if (maxAttempts !== undefined && (!Number.isInteger(maxAttempts) || maxAttempts <= 0)) {
+      throw new RangeError(`El maximo de intentos por mensaje debe ser un entero positivo, se recibio ${maxAttempts}`);
     }
   }
 
@@ -89,9 +104,15 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
       try {
         cursor = await this.handle(message, cursor, log);
       } catch (error) {
+        log.recordIncident(message.messageId.toString(), this.describe(error), clock.now());
+        if (await this.quarantineIfExhausted(message, error, log)) {
+          // Bug 2: agotado el umbral, el mensaje queda en cuarentena y el
+          // cursor avanza sobre el para no bloquear el resto del buzon.
+          cursor = cursor.advanceTo(message.mailboxUid, clock.now());
+          continue;
+        }
         // Se conserva el punto de lectura del ultimo mensaje confirmado, de modo
         // que la siguiente ejecucion no reprocesa lo confirmado ni se salta este.
-        log.recordIncident(message.messageId.toString(), this.describe(error), clock.now());
         await this.persist(cursor, log);
         throw error;
       }
@@ -179,6 +200,56 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
       dueDate: decision.kind === 'update-body' ? dueDate : existing.dueDate,
       applicationLink: decision.kind === 'update-body' ? applicationLink : existing.applicationLink
     });
+  }
+
+  /**
+   * Registra el fallo del ciclo y, si el mensaje alcanzo `maxAttempts`, lo
+   * guarda en cuarentena. Si el propio registro del fallo falla (por ejemplo,
+   * Mongo caido), no se pone nada en cuarentena: una caida de infraestructura
+   * no debe mandar mensajes sanos a cuarentena. Se devuelve `false` y el
+   * llamador propaga el error original, como antes de esta correccion.
+   */
+  private async quarantineIfExhausted(
+    message: RawInstitutionalMessage,
+    error: unknown,
+    log: IngestionRunLog
+  ): Promise<boolean> {
+    const { poisonMessages, quarantine, clock } = this.deps;
+    if (!poisonMessages) return false;
+
+    const cause = this.describe(error);
+    let attempts: number;
+    try {
+      attempts = await poisonMessages.failures.recordFailure(message.mailboxUid, cause, clock.now());
+    } catch {
+      return false;
+    }
+    if (attempts < poisonMessages.maxAttempts) return false;
+
+    await quarantine.save({
+      mailboxUid: message.mailboxUid,
+      cause: `Fallo en ${attempts} ciclos consecutivos de ingesta: ${cause}`,
+      rawSource: this.reconstructSource(message),
+      quarantinedAt: clock.now()
+    });
+    log.recordQuarantined();
+    return true;
+  }
+
+  /**
+   * `RawInstitutionalMessage` ya no conserva el MIME original del buzon; se
+   * reconstruyen los encabezados y el cuerpo crudo que si conserva, suficiente
+   * para diagnosticar el fallo sin depender de que el buzon aun lo tenga.
+   */
+  private reconstructSource(message: RawInstitutionalMessage): string {
+    return [
+      `Message-ID: ${message.messageId.toString()}`,
+      `From: ${message.sender}`,
+      `Subject: ${message.subject}`,
+      `Date: ${message.receivedAt.toISOString()}`,
+      '',
+      message.rawBody
+    ].join('\r\n');
   }
 
   private async persist(cursor: IngestionCursor, log: IngestionRunLog): Promise<void> {

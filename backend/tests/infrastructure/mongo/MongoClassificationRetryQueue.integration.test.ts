@@ -87,4 +87,21 @@ describe('MongoClassificationRetryQueue (integración contra MongoDB real)', () 
       createdAt: new Date('2026-09-12T08:01:00Z')
     });
   });
+
+  it('contains indica si el mensaje está en la cola (corrección del bug 1)', async () => {
+    const message: InstitutionalMessage = {
+      messageId: MessageId.fromHeader('<msg-contains@upb.edu.co>'),
+      mailboxUid: 9,
+      sender: 'sistemas@upb.edu.co',
+      subject: 'Aviso',
+      sentAt: new Date('2026-09-12T08:00:00Z'),
+      recipients: [],
+      body: 'Texto.',
+      attachments: []
+    };
+    await queue.save({ messageId: 'msg-contains', message, error: 'fallo', createdAt: new Date('2026-09-12T08:01:00Z') });
+
+    expect(await queue.contains('msg-contains')).toBe(true);
+    expect(await queue.contains('msg-ausente')).toBe(false);
+  });
 });

@@ -4,6 +4,7 @@ import type {
   ProgramTargetingRepositoryPort
 } from '../../../../domain/ports/out/ProgramTargetingRepositoryPort.js';
 import type { ProgramTargeting } from '../../../../domain/value-objects/ProgramTargeting.js';
+import type { SemesterRange } from '../../../../domain/value-objects/SemesterRange.js';
 
 interface ProgramTargetingDocument {
   readonly _id: string;
@@ -11,6 +12,7 @@ interface ProgramTargetingDocument {
   readonly kind: ProgramTargeting['kind'];
   readonly facultyId?: string;
   readonly programIds?: readonly string[];
+  readonly semesterRange?: SemesterRange | null;
   readonly persistedAt: Date;
 }
 
@@ -34,6 +36,7 @@ function toDocument(record: ProgramTargetingRecord): ProgramTargetingDocument {
         _id: record.messageId,
         messageId: record.messageId,
         kind: 'all-community',
+        semesterRange: record.semesterRange ?? null,
         persistedAt: record.persistedAt
       };
     case 'faculty':
@@ -42,6 +45,7 @@ function toDocument(record: ProgramTargetingRecord): ProgramTargetingDocument {
         messageId: record.messageId,
         kind: 'faculty',
         facultyId: record.targeting.facultyId,
+        semesterRange: record.semesterRange ?? null,
         persistedAt: record.persistedAt
       };
     case 'programs':
@@ -50,6 +54,7 @@ function toDocument(record: ProgramTargetingRecord): ProgramTargetingDocument {
         messageId: record.messageId,
         kind: 'programs',
         programIds: [...record.targeting.programIds],
+        semesterRange: record.semesterRange ?? null,
         persistedAt: record.persistedAt
       };
   }
@@ -80,10 +85,12 @@ export class MongoProgramTargetingRepository implements ProgramTargetingReposito
       return null;
     }
 
-    return {
+    const record: ProgramTargetingRecord = {
       messageId: found.messageId,
       targeting: toTargeting(found),
       persistedAt: found.persistedAt
     };
+    // Registros anteriores a HU-37 no tienen el campo: se leen sin restriccion.
+    return found.semesterRange ? { ...record, semesterRange: found.semesterRange } : record;
   }
 }

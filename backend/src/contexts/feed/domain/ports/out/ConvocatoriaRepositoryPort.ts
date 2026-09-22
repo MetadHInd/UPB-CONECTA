@@ -1,5 +1,5 @@
 import type { ConsolidatedMessageRecord } from '../../../../ingestion/domain/ports/out/ConsolidatedMessageRegistryPort.js';
-import type { IdentityProfile } from '../../../../identity/domain/entities/IdentityProfile.js';
+import type { StudentSegment } from '../../value-objects/StudentSegment.js';
 
 export interface FeedQueryOptions {
   readonly limit?: number | undefined;
@@ -12,7 +12,7 @@ export interface ConvocatoriaEntry {
 }
 
 export interface ConvocatoriaRepositoryPort {
-  findSegmentedFeed(profile: IdentityProfile, options?: FeedQueryOptions): Promise<ConvocatoriaEntry[]>;
+  findSegmentedFeed(profile: StudentSegment, options?: FeedQueryOptions): Promise<ConvocatoriaEntry[]>;
 }
 
 export const ConvocatoriaRepositoryPortName = 'ConvocatoriaRepositoryPort';

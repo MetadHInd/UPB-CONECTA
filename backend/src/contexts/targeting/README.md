@@ -43,6 +43,10 @@ Esto cumple el criterio 4: cualquier actualización del catálogo requiere cambi
 
 La resolución de la jerarquía facultad → programa se hace con un servicio de dominio puro, `FacultyProgramResolver`, que recibe el catálogo ya cargado y devuelve el conjunto de programas de la facultad sin I/O directo.
 
+### Filtro de semestre (HU-37)
+
+`SemesterRange` (`{ min, max | null }`) es un filtro **ortogonal** a `ProgramTargeting`: un registro de targeting puede llevar `semesterRange` además de su segmentación por programa, facultad o toda la comunidad. Si falta, no hay restricción. `ProgramTargetingResolver` todavía no lo extrae del texto del mensaje. Ver `src/contexts/profile/README.md`.
+
 ## Persistencia consultable
 
 Se expone un puerto de salida `ProgramTargetingRepositoryPort` con:

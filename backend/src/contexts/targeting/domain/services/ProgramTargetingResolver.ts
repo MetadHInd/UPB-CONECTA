@@ -6,16 +6,7 @@ import {
   programTargeting,
   type ProgramTargeting
 } from '../value-objects/ProgramTargeting.js';
-
-function normalizeText(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+import { normalizeCatalogText as normalizeText } from './CatalogTextNormalization.js';
 
 export class ProgramTargetingResolver {
   constructor(private readonly catalog: InstitutionalProgramCatalog) {}

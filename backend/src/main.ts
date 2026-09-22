@@ -10,6 +10,7 @@ import { MongoConsolidatedMessageRegistry } from './contexts/ingestion/infrastru
 import { MongoQuarantineRepository } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoQuarantineRepository.js';
 import { MongoIngestionCursorRepository } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoIngestionCursorRepository.js';
 import { MongoIngestionRunLogRepository } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoIngestionRunLogRepository.js';
+import { MongoMessageFailureRepository } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoMessageFailureRepository.js';
 import { InMemoryMailboxAdapter } from './contexts/ingestion/infrastructure/adapters/out/memory/InMemoryMailboxAdapter.js';
 import { SystemClock } from './contexts/ingestion/infrastructure/adapters/out/memory/SystemClock.js';
 import { MimeMessageNormalizerAdapter } from './contexts/ingestion/infrastructure/adapters/out/normalization/MimeMessageNormalizerAdapter.js';
@@ -79,6 +80,10 @@ async function bootstrap(): Promise<void> {
     normalizer: new MimeMessageNormalizerAdapter(),
     dueDateExtractor: new SpanishDueDateExtractor(),
     classifyMessage,
+    // Bug 2: un mensaje que falla en `messageMaxAttempts` ciclos va a cuarentena
+    // en vez de bloquear el buzon. Se lee al arrancar, como la ventana de
+    // deduplicacion: cambiarlo requiere reiniciar, no recompilar.
+    poisonMessages: { failures: new MongoMessageFailureRepository(db), maxAttempts: config.messageMaxAttempts },
     clock,
     batchSize: config.batchSize
   });

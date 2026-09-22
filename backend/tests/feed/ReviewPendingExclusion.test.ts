@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GetSegmentedFeed } from '../../src/contexts/feed/application/GetSegmentedFeed.js';
 import { FacultyProgramResolver } from '../../src/contexts/targeting/domain/services/FacultyProgramResolver.js';
 import { InMemoryProgramTargetingRepository } from '../../src/contexts/targeting/infrastructure/adapters/out/memory/InMemoryProgramTargetingRepository.js';
+import { InMemoryClassificationRetryQueue } from '../../src/contexts/classification/infrastructure/adapters/out/memory/InMemoryClassificationRetryQueue.js';
 import { InMemoryClassificationResultRepository } from '../../src/contexts/classification/infrastructure/adapters/out/memory/InMemoryClassificationResultRepository.js';
 import { ClassificationResult } from '../../src/contexts/classification/domain/entities/ClassificationResult.js';
 import { MessageCategory } from '../../src/contexts/classification/domain/value-objects/MessageCategory.js';
@@ -28,10 +29,11 @@ describe('HU-10 — exclusion del feed de documentos en revision pendiente (gap 
       ]) as any,
       programTargetingRepo: new InMemoryProgramTargetingRepository(),
       facultyResolver: new FacultyProgramResolver({ faculties: [], programs: [] } as any),
-      classificationResultRepo
+      classificationResultRepo,
+      classificationRetryQueue: new InMemoryClassificationRetryQueue()
     });
 
-    const result = await useCase.execute({ name: 'Ana', email: 'a@x', program: 'P1', semester: 3 });
+    const result = await useCase.execute({ program: 'P1', semester: 3 });
     const ids = result.feed.map((entry) => entry.id);
 
     expect(ids).toContain('c-publicado');
@@ -48,7 +50,8 @@ describe('HU-10 — exclusion del feed de documentos en revision pendiente (gap 
       convocatoriaRepo: new InMemoryConvocatoriaRepo([{ id: 'c1', record: { representativeMessageId: 'm1' } }]) as any,
       programTargetingRepo: new InMemoryProgramTargetingRepository(),
       facultyResolver: new FacultyProgramResolver({ faculties: [], programs: [] } as any),
-      classificationResultRepo
+      classificationResultRepo,
+      classificationRetryQueue: new InMemoryClassificationRetryQueue()
     });
     const profile = { name: 'Ana', email: 'a@x', program: 'P1', semester: 3 };
 

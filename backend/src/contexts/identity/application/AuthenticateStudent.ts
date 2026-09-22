@@ -1,4 +1,5 @@
 import type { IdentityCredentials, IdentityProfile, IdentityProviderPort } from '../domain/ports/out/IdentityProviderPort.js';
+import type { AuthenticatedProfileSyncPort } from '../domain/ports/out/AuthenticatedProfileSyncPort.js';
 import type { RateLimiterPort } from '../domain/ports/out/RateLimiterPort.js';
 import { AuthenticationFailureKind, type AuthenticationResult } from '../domain/entities/AuthenticationResult.js';
 import type { SessionTokenIssuer } from './SessionTokenIssuer.js';
@@ -25,6 +26,7 @@ export class AuthenticateStudent {
       readonly provider: IdentityProviderPort;
       readonly rateLimiter: RateLimiterPort;
       readonly sessions: SessionTokenIssuer;
+      readonly profileSync: AuthenticatedProfileSyncPort;
     }
   ) {}
 
@@ -62,6 +64,9 @@ export class AuthenticateStudent {
     }
 
     this.dependencies.rateLimiter.recordSuccess(accountId, origin);
+    // HU-37: el perfil persistido se refresca con el directorio antes de abrir
+    // la sesion, para que el primer feed ya use programa y semestre vigentes.
+    await this.dependencies.profileSync.syncFromDirectory(profile);
     // HU-45: el sujeto del token es el correo institucional, que el proveedor
     // siempre devuelve (a diferencia de `studentId`, que es opcional).
     const session = await this.dependencies.sessions.startSession(profile.email);

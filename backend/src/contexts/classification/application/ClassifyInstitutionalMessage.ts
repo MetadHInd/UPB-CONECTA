@@ -81,9 +81,36 @@ export class ClassifyInstitutionalMessage {
           createdAt: this.deps.clock.now()
         });
       }
+      await this.inheritPreviousResult(message, previousMessageId, cause);
 
       return null;
     }
+  }
+
+  /**
+   * Correccion del bug 1, caso reenvio: el feed oculta un mensaje que esta en
+   * la cola de reintento sin resultado de clasificacion. En un reenvio, este
+   * mensaje pasa a ser el representativo del grupo; si el proveedor falla al
+   * reclasificarlo, la convocatoria ya publicada desapareceria del feed por un
+   * fallo transitorio. Por eso el reenvio hereda el resultado del
+   * representativo anterior (mismo estado, sin alertar ni notificar: el estado
+   * no cambia). Solo ante un fallo del proveedor: un descarte por regla es una
+   * decision explicita de revision humana y no hereda nada.
+   */
+  private async inheritPreviousResult(
+    message: InstitutionalMessage,
+    previousMessageId: string | null,
+    cause: string
+  ): Promise<void> {
+    if (!previousMessageId || !this.deps.resultRepository) return;
+    const previous = await this.deps.resultRepository.findByMessageId(previousMessageId);
+    if (!previous) return;
+    await this.deps.resultRepository.save({
+      ...previous,
+      messageId: message.messageId.toString(),
+      reason: `Heredado de ${previousMessageId}: la reclasificacion del reenvio fallo (${cause})`,
+      persistedAt: this.deps.clock.now()
+    });
   }
 
   /**
