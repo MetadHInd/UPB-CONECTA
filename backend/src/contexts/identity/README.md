@@ -16,6 +16,10 @@ La política del backend es explícita:
 
 `AuthenticateStudent` recibe una dependencia obligatoria `profileSync: AuthenticatedProfileSyncPort`. Tras cada autenticación correcta, y antes de emitir la sesión, envía los datos frescos del directorio al contexto `profile`, que implementa el puerto. `identity` no importa nada de `profile`. Si la sincronización falla, el login falla. Detalle en `src/contexts/profile/README.md`.
 
+## Varios destinos de sincronización (HU-30)
+
+Desde HU-30, el foro también necesita los datos del directorio en cada login. `FanOutProfileSync` (`infrastructure/adapters/out/profile-sync/`) implementa `AuthenticatedProfileSyncPort` invocando en orden a varios destinos (`profile` y `forum`). Si uno falla, el login falla. Detalle en `src/contexts/forum/README.md`.
+
 ## Puertos y adaptadores
 
 ### Dominio
