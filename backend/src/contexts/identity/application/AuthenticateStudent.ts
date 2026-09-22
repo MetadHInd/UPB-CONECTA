@@ -1,6 +1,7 @@
-import type { IdentityProviderPort, IdentityCredentials } from '../domain/ports/out/IdentityProviderPort.js';
+import type { IdentityCredentials, IdentityProfile, IdentityProviderPort } from '../domain/ports/out/IdentityProviderPort.js';
 import type { RateLimiterPort } from '../domain/ports/out/RateLimiterPort.js';
 import { AuthenticationFailureKind, type AuthenticationResult } from '../domain/entities/AuthenticationResult.js';
+import type { SessionTokenIssuer } from './SessionTokenIssuer.js';
 
 export interface AuthenticateStudentInput extends IdentityCredentials {}
 
@@ -23,6 +24,7 @@ export class AuthenticateStudent {
     private readonly dependencies: {
       readonly provider: IdentityProviderPort;
       readonly rateLimiter: RateLimiterPort;
+      readonly sessions: SessionTokenIssuer;
     }
   ) {}
 
@@ -38,14 +40,9 @@ export class AuthenticateStudent {
       };
     }
 
+    let profile: IdentityProfile;
     try {
-      const profile = await this.dependencies.provider.authenticate(input);
-      this.dependencies.rateLimiter.recordSuccess(accountId, origin);
-      return {
-        ok: true,
-        profile,
-        message: 'Autenticación correcta.'
-      };
+      profile = await this.dependencies.provider.authenticate(input);
     } catch (error) {
       this.dependencies.rateLimiter.recordFailure(accountId, origin);
 
@@ -63,5 +60,16 @@ export class AuthenticateStudent {
         message: 'Credenciales inválidas.'
       };
     }
+
+    this.dependencies.rateLimiter.recordSuccess(accountId, origin);
+    // HU-45: el sujeto del token es el correo institucional, que el proveedor
+    // siempre devuelve (a diferencia de `studentId`, que es opcional).
+    const session = await this.dependencies.sessions.startSession(profile.email);
+    return {
+      ok: true,
+      profile,
+      message: 'Autenticación correcta.',
+      session
+    };
   }
 }
