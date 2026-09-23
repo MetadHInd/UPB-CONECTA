@@ -481,3 +481,61 @@ Por eso **no se agregó contador de intentos a esta cola**: con cero reintentos,
 | — | `ConfidenceScore`/`ReviewThreshold` validan su rango | `tests/classification/PublicationDecisionPolicy.test.ts` |
 | — | Puntaje determinista del stub (decisión 5) | `tests/classification/ClassifyInstitutionalMessageReviewThreshold.test.ts` (`decision 5: ...`) |
 | — | Dominio desacoplado de infraestructura | `npm run check:architecture` |
+
+## HU-11 — reclasificación manual con realimentación etiquetada (RF-16, RF-75)
+
+### Alcance
+
+Un administrador de contenido corrige la categoría, los programas destinatarios y la fecha de cierre de un documento que ya pasó por el clasificador (HU-06), sea que haya quedado publicado o en revisión pendiente (HU-10). La corrección alimenta directamente el corpus etiquetado que HU-10 usa para calcular precisión y cobertura, y deja su propio historial para medir qué tan seguido el equipo humano tiene que intervenir — un indicador de degradación del clasificador en producción.
+
+No se implementa ninguna interfaz de administración (UI): el backend no expone HTTP todavía, igual que HU-09, HU-30 y HU-45. Se deja el caso de uso listo para que una capa de administración futura lo invoque directamente.
+
+### Decisión: "corregir" es "aprobar"
+
+Los criterios 3 y 4 describen dos casos distintos (un documento en revisión pendiente que "se aprueba", y uno ya publicado que "se corrige"), pero la historia no define ninguna acción de aprobación separada de la corrección. Se evaluaron dos lecturas:
+
+- Lectura A: introducir un tercer estado ("corregido, pendiente de aprobación explícita").
+- **Lectura B (la implementada)**: la corrección de un administrador *es* la aprobación. Un administrador que revisa y corrige un documento ya lo está vetando; no tiene sentido pedirle una segunda confirmación de que su propia corrección es correcta.
+
+Por eso `CorrectClassification` siempre deja `publicationStatus: 'published'` después de una corrección, sin importar el estado previo — una sola regla cubre los criterios 3 y 4 sin ramas especiales ni un estado no modelado en `ClassificationResultRecord`.
+
+### Decisión: sin bus de eventos
+
+El diseño de la historia en Jira menciona que la corrección "dispara un evento de dominio `ClassificationCorrected` que recalcula segmentación y notificaciones". Ningún otro contexto de este repositorio usa un bus de eventos ni una clase `DomainEvent`: todo el proyecto, incluida la propia clasificación, orquesta con casos de uso que llaman puertos directamente (ver `ClassifyInstitutionalMessage`). Introducir un mecanismo de eventos nuevo para una sola historia rompería ese patrón sin necesidad.
+
+El mismo efecto se logra sin él: la segmentación no está materializada en ningún lado (el feed la lee en vivo desde `ProgramTargetingRepositoryPort` en cada consulta, ver README de `feed`), así que "recalcularla" es exactamente volver a guardar el registro de targeting con el valor corregido — ya ocurre en el flujo síncrono del caso de uso.
+
+### Identidad: por `ConvocatoriaId`, no por `messageId`
+
+`CorrectClassification` recibe un `ConvocatoriaId` (el mismo identificador de HU-15, `{sender, subject, firstSentAt}`), no un `messageId` suelto. La fecha de cierre vive en `ConsolidatedMessageRecord` (contexto `ingestion`), que solo se puede leer y volver a guardar por esa identidad — no existe un `findByRepresentativeMessageId`. El caso de uso resuelve el `messageId` internamente desde `consolidated.representativeMessageId` y lo usa para las tres actualizaciones (clasificación, targeting, caso etiquetado). Esto además encaja con el flujo real: el administrador corrige *desde la vista de detalle* (HU-15), que ya se identifica así.
+
+### Caso etiquetado (criterio 2): se reutiliza `LabeledSampleRepositoryPort` de HU-10
+
+El criterio 2 pide registrar la corrección "con el valor propuesto por el modelo y el valor corregido por el humano". Eso es exactamente lo que `LabeledSample { messageId, actualCategory }` ya modela desde HU-10 — el valor propuesto por el modelo sigue disponible sin duplicarlo, en `ClassificationResultRecord.proposedCategory`. No se creó una entidad paralela: cada corrección hace `labeledSampleRepo.save({ messageId, actualCategory: correctedCategory })`, con upsert por `messageId` (mismo comportamiento que ya tenía el repositorio). Esto conecta HU-11 con HU-10 tal como pide la propia historia ("para que el equipo acumule el corpus con el que se mide el desempeño real del clasificador"): `ComputeClassificationPrecision` y `ComputeCoverageMetric` ya leen de este mismo repositorio, sin ningún cambio.
+
+### Historial de correcciones (criterio 5): `ClassificationCorrectionRepositoryPort`, distinto de `LabeledSample`
+
+`LabeledSample` upsertea por `messageId` — guarda la mejor verdad actual, no un historial. El criterio 5 pide explícitamente "el histórico de correcciones", y una corrección puede repetirse sobre el mismo documento (un administrador se equivoca al corregir, o el criterio real cambia con el tiempo). Por eso se agregó un puerto nuevo, `ClassificationCorrectionRepositoryPort` (`domain/ports/out/`), **append-only** (`insertOne` en Mongo, igual que `MongoForumAccessAuditLog` de HU-30): cada corrección es un hecho que se conserva, nunca se sobrescribe.
+
+`ComputeManualCorrectionRate` (caso de uso puro, mismo estilo que `ComputeClassificationPrecision`/`ComputeCoverageMetric`) cuenta **documentos distintos corregidos**, no eventos de corrección — un documento corregido dos veces sigue siendo un solo documento que necesitó intervención humana, no dos. La tasa es `documentos corregidos / total clasificado`; sin ningún documento clasificado, es `null` (mismo criterio que HU-10: no se afirma un porcentaje sin datos evaluables).
+
+### Definición de terminado: corpus exportable
+
+El corpus etiquetado ya es exportable por diseño, sin trabajo adicional: `LabeledSampleRepositoryPort.findAll()` devuelve un arreglo de objetos planos serializables a JSON (`{messageId, actualCategory}[]`), igual que `ClassificationCorrectionRepositoryPort.findAll()`. No se construyó un caso de uso de "exportar" porque no hay nada que transformar — la definición de terminado ya se cumple con el contrato de lectura existente.
+
+### Gap: `NotificationSchedulingPort` no transporta la fecha de cierre
+
+El criterio 3 pide programar las notificaciones "con la fecha corregida". `NotificationSchedulingPort.scheduleForPublication(record: ClassificationResultRecord)` (HU-10, gap 2) solo recibe el registro de clasificación, que no incluye `dueDate` — ese campo vive en `ConsolidatedMessageRecord`, en otro contexto. Ampliar la firma del puerto para HU-11 tocaría también a `ClassifyInstitutionalMessage` (su único otro llamador) fuera del alcance de esta historia, y el puerto sigue siendo un stub explícito de HU-20 sin plantillas ni contenido real. `CorrectClassification` llama al puerto igual que antes (con el registro de clasificación corregido) para que quien construya el planificador real de HU-20 tenga el punto de enganche; conectar la fecha de cierre queda diferido a esa historia, igual que el resto del contenido de las notificaciones.
+
+### Criterios de aceptación y pruebas (HU-11)
+
+| Criterio | Descripción | Prueba correspondiente |
+|---|---|---|
+| 1 | El administrador corrige categoría, programas destinatarios y fecha de cierre de un documento clasificado o en revisión pendiente | `tests/classification/CorrectClassification.test.ts` (`criterio 1: ...`, con documento pendiente y con documento publicado) |
+| 2 | La corrección se registra como caso etiquetado (propuesta del modelo + valor corregido) | `tests/classification/CorrectClassification.test.ts` (`criterio 2: ...`) |
+| 3 | Un documento en revisión pendiente que se corrige se publica y programa sus notificaciones | `tests/classification/CorrectClassification.test.ts` (`criterio 3: ...`) |
+| 4 | Un documento ya publicado que se corrige recalcula segmentación y avisos de forma consistente | `tests/classification/CorrectClassification.test.ts` (`criterio 4: ...`) |
+| 5 | El histórico de correcciones permite calcular la tasa de corrección manual | `tests/classification/ManualCorrectionRate.test.ts` |
+| — | Persistencia real del historial de correcciones (append-only) | `tests/infrastructure/mongo/MongoClassificationCorrectionRepository.integration.test.ts` |
+| — | Solo se corrige lo ya clasificado; sin resultado previo se rechaza explícitamente | `tests/classification/CorrectClassification.test.ts` (`sin resultado de clasificacion previo...`) |
+| — | Dominio desacoplado de infraestructura | `npm run check:architecture` |
