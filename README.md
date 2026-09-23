@@ -29,6 +29,6 @@ Ver el README de cada subcarpeta para arquitectura, cómo levantar el entorno y 
 
 ## Estado actual
 
-- **Backend:** HU-01, HU-02, HU-03, HU-04 (criterios 1-4), HU-05, HU-06, HU-07, HU-08, HU-09, HU-10, HU-11, HU-12, HU-15 (criterios 1-4), HU-16 (criterios 1/2/3/5), HU-18 (criterios 1-5), HU-21 (criterios 1/2/3/6), HU-30, HU-37, HU-38 (criterios 1/2/3/5/6), HU-43, HU-44 (criterios 2/4/5/6), HU-45, HU-46, HU-53, HU-54 y HU-55 (criterios 3-4) implementadas, 573/573 pruebas en verde en esta rama (HU-46 aún sin fusionar; `main` está en 567/567), CI con `main` protegida (PR obligatorio).
+- **Backend:** HU-01, HU-02, HU-03, HU-04 (criterios 1-4), HU-05, HU-06, HU-07, HU-08, HU-09, HU-10, HU-11, HU-12, HU-15 (criterios 1-4), HU-16 (criterios 1/2/3/5), HU-18 (criterios 1-5), HU-21 (criterios 1/2/3/6), HU-30, HU-37, HU-38 (criterios 1/2/3/5/6), HU-43, HU-44 (criterios 2/4/5/6), HU-45, HU-46, HU-50, HU-53, HU-54 y HU-55 (criterios 3-4) implementadas, 601/601 pruebas en verde en esta rama (HU-50 aún sin fusionar; `main` está en 586/586), CI con `main` protegida (PR obligatorio).
 - **Frontend:** UI preliminar completa (splash, inicio, noticias, foro, mapa esquemático, chatbot, perfil) sobre datos mock, más HU-17 (caché offline real con Room, sincronización al recuperar la red); sin conexión real al backend todavía.
 - El resto del backlog (11 épicas, 51 historias restantes) vive en Jira sin código asociado.

@@ -1,6 +1,8 @@
 {
   "operations": [
     { "operation": "ManageTopics", "requiredRole": "content-admin" },
-    { "operation": "CorrectClassification", "requiredRole": "content-admin" }
+    { "operation": "CorrectClassification", "requiredRole": "content-admin" },
+    { "operation": "PublishConvocatoria", "requiredRole": "content-admin" },
+    { "operation": "WithdrawConvocatoria", "requiredRole": "content-admin" }
   ]
 }

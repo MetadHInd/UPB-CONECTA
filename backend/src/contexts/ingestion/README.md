@@ -8,8 +8,9 @@ Implementacion de **HU-01 (SCRUM-13): Conexion programada e idempotente al buzon
 **HU-04 (SCRUM-16): Cuarentena de mensajes no procesables y bitacora de ingesta** (criterios 1-4; criterio 5 diferido, ver seccion propia),
 **HU-08 (SCRUM-20): Extraccion de fecha de cierre y enlace de postulacion**,
 **HU-55 (SCRUM-67): Rendimiento bajo carga y degradacion controlada** (criterios 3 y 4, parciales; el resto diferido, ver seccion propia) y
-**HU-15 (SCRUM-27): Vista de detalle de la convocatoria** (criterios 1-4; criterio 5 diferido, depende de HU-24).
-Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05, RF-06, RF-07, RF-11, RF-12, RF-22, RF-42, RNF-01 a RNF-12, RNF-27, RNF-40. Caso de uso CU-01, pasos 1 a 6, flujo alternativo A, excepcion E2. CU-02 paso 7.
+**HU-15 (SCRUM-27): Vista de detalle de la convocatoria** (criterios 1-4; criterio 5 diferido, depende de HU-24) y
+**HU-50 (SCRUM-62): Publicacion y retiro manual de contenido del feed**.
+Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05, RF-06, RF-07, RF-11, RF-12, RF-22, RF-36, RF-42, RF-74, RNF-01 a RNF-12, RNF-18, RNF-27, RNF-40. Caso de uso CU-01, pasos 1 a 6, flujo alternativo A, excepcion E2. CU-02 paso 7.
 
 ## Stack
 
@@ -275,6 +276,80 @@ propio ticket lo marca como dependiente de HU-24 (catálogo de espacios), que no
 | 3. Dominio de destino expuesto antes de abrir el enlace | Cubierto (extracción del dominio; abrir el navegador es del cliente) | `GetConvocatoriaDetail.test.ts` |
 | 4. Estado de vencida indicado de forma inequívoca | Cubierto | `ConvocatoriaStatusPolicy.test.ts`, `GetConvocatoriaDetail.test.ts` |
 | 5. Acceso directo al mapa | Diferido | Depende de HU-24 (catálogo de espacios), no implementada |
+
+## HU-50 — Publicación y retiro manual de contenido del feed (RF-74, RF-36, RNF-18)
+
+### Alcance
+
+Un administrador de contenido publica una convocatoria construida manualmente (criterios 1, 2) y retira del feed una publicación ya visible (criterios 3, 4, 5), con auditoría completa de ambas acciones (criterio 6). Cubre lo que la ingesta automática no captó, y corrige de inmediato contenido erróneo que ya llegó a los estudiantes.
+
+**No hay servidor HTTP en este repositorio, y eso no bloquea la historia** — mismo patrón que HU-09, HU-30, HU-45 y HU-46. No existe un "formulario" real (criterio 1): se entrega `PublishConvocatoria`, el caso de uso que tanto un futuro formulario HTTP como cualquier otro proceso invocarían con los mismos datos de entrada.
+
+### Decisión: `PublishConvocatoria` no reutiliza literalmente `IngestInstitutionalMessages`
+
+El diseño de la historia en Jira dice: *"publicación manual y publicación automática invocan el mismo caso de uso `PublishConvocatoria`"*, lo que sugiere refactorizar el pipeline automático para delegar aquí.
+
+- **Opción A — refactorizar `IngestInstitutionalMessages` para delegar en `PublishConvocatoria`.** Descartada: ese pipeline ya tiene una política de reenvíos, deduplicación semántica (HU-03) e idempotencia (HU-01) fuertemente probadas (más de 80 pruebas dependen de su comportamiento actual). Operarle cirugía para esta historia es un riesgo alto y un alcance mayor al que pide HU-50.
+- **Opción B (la implementada) — `PublishConvocatoria` reproduce el mismo estado final, sin compartir código.** Escribe en los mismos tres repositorios que ya orquesta `CorrectClassification` (HU-11): `ConsolidatedMessageRegistryPort` (aquí), `ClassificationResultRepositoryPort` (classification) y `ProgramTargetingRepositoryPort` (targeting) — funcionalmente equivalente al resultado de la ingesta automática, no literalmente el mismo objeto en memoria.
+
+Como no hay clasificador involucrado, la categoría la fija el administrador directamente; el registro persistido usa `ConfidenceScore.certain()` (1) porque no hay incertidumbre de modelo que reportar — es una decisión humana, no una predicción.
+
+**Identidad de una convocatoria manual.** No existe un `Message-ID` real de correo del que derivar `representativeMessageId`. `ManualMessageIdGeneratorPort` (`RandomManualMessageIdGenerator` en infraestructura, UUID v4 con `node:crypto`) genera uno sintético con la misma forma que exige `MessageId.fromHeader` (incluye `@`), para no crear un segundo esquema de identidad paralelo.
+
+**Sin validación de esquema de entrada aquí, a propósito.** Validar la forma de los datos que llegan a un punto de entrada es el criterio 3 de HU-47 ("hardening del transporte, validación de entradas"), historia hermana de este mismo backlog. Duplicar esa responsabilidad aquí reabriría esa historia en dos lugares.
+
+### Decisión: dónde vive el estado "retirada"
+
+`ConsolidatedMessageRecord` gana `withdrawnAt: Date | null`. Se evaluaron dos alternativas:
+
+- **Un tercer valor de `ClassificationResultRecord.publicationStatus`** (`classification`, hoy `'published' | 'pending-review'`). Descartada: ese campo representa si el **clasificador** confía en el documento, una pregunta distinta de si un **administrador** decidió retirarlo después de publicado — conflicta dos ejes de decisión distintos en un solo campo, y obligaría a `classification` a modelar un concepto (retiro de contenido) que no le pertenece.
+- **`withdrawnAt` en `ConsolidatedMessageRecord`** (la elegida). Vive en el mismo lugar que ya lee el feed y el detalle directamente (HU-12, HU-15) — ninguna entidad nueva, ningún contexto nuevo. Igual que la cuarentena de HU-04, el documento **no se borra**: se marca, y el resto del sistema decide qué hacer con eso.
+
+Un reenvío que llega después de un retiro **no lo revierte automáticamente** — `IngestInstitutionalMessages` conserva `existing.withdrawnAt` en la ruta de actualización; deshacer en silencio la decisión de un administrador sería peor que no resucitar el contenido.
+
+### Efectos en cascada del retiro (criterios 3, 4, 5)
+
+- **Criterio 3 (feed).** `GetSegmentedFeed` (contexto `feed`) excluye cualquier entrada con `withdrawnAt` presente — misma familia de chequeo que la exclusión por revisión pendiente (HU-10). El chequeo es *truthy*, no `!== null`: dobles de prueba anteriores a esta historia construyen `record` parcial sin declarar el campo (`undefined`), y un histórico sin el campo nunca fue retirado.
+- **Criterio 4 (notificaciones).** `NotificationSchedulingPort` (contexto `classification`) gana `cancelScheduledNotifications(messageId)`, agregado de forma **aditiva** — no cambia la firma de `scheduleForPublication`, que ya usan `ClassifyInstitutionalMessage` (HU-06/HU-10) y `CorrectClassification` (HU-11). El adaptador en memoria sigue siendo el stub explícito de HU-10 (gap 2): solo registra la llamada, sin planificador real todavía (HU-20).
+- **Criterio 5 (detalle).** `GetConvocatoriaDetail` (HU-15) gana `withdrawn: boolean` y `withdrawnAt: Date | null` en `ConvocatoriaDetail`. No se oculta el resto del contenido (`body`, `sender`, etc.): el criterio pide "informar", no "romper" — el cliente decide cómo mostrar el aviso sobre contenido que el estudiante ya tenía guardado (`personalization`, HU-16, no necesitó cambios: nunca resuelve la convocatoria subyacente, solo guarda banderas opacas por `convocatoriaId`).
+
+### Auditoría (criterio 6): `ConvocatoriaAuditLogPort`, no `AuthorizationAuditLogPort`
+
+Nuevo puerto append-only (`domain/ports/out/ConvocatoriaAuditLogPort.ts`; `MongoConvocatoriaAuditLog`, colección `ingestion_convocatoria_audit`, `insertOne`) — mismo patrón que `MongoForumAccessAuditLog` (HU-30), `MongoClassificationCorrectionRepository` (HU-11) y `MongoAuthorizationAuditLog` (HU-46).
+
+No se reutilizó `AuthorizationAuditLogPort` de `identity` (HU-46): ese log está acotado a "intentos no autorizados" y "cambios de rol" — eventos de seguridad de una cuenta. Publicar o retirar contenido es una decisión de negocio sobre una convocatoria, con un "objeto afectado" que ese contrato no modela. Mezclar ambos conceptos obligaría al log de seguridad a conocer convocatorias, o a este a conocer roles.
+
+### Autorización
+
+`PublishConvocatoria` y `WithdrawConvocatoria` están declaradas en `config/protected-operations.json` como `content-admin` (HU-46) — el mismo mecanismo de `AuthorizeOperation` que ya cubre `ManageTopics` y `CorrectClassification` protege estas dos operaciones cuando exista el adaptador de entrada que las invoque.
+
+### Puertos y adaptadores nuevos
+
+| Pieza | Capa | Rol |
+|---|---|---|
+| `ConsolidatedMessageRecord.withdrawnAt` | Dominio (dato) | Estado de retiro de una convocatoria |
+| `ManualMessageIdGeneratorPort` / `RandomManualMessageIdGenerator` | Puerto / infraestructura | Identidad sintética para una convocatoria sin correo de origen |
+| `ConvocatoriaAuditLogPort` / `InMemory`·`MongoConvocatoriaAuditLog` | Puerto / infraestructura | Auditoría append-only de publicaciones y retiros |
+| `PublishConvocatoria`, `WithdrawConvocatoria` | Aplicación | Casos de uso (criterios 1-6) |
+| `NotificationSchedulingPort.cancelScheduledNotifications` | Puerto (classification, extendido) | Cancelación de avisos ante un retiro |
+| `GetConvocatoriaDetail` (`withdrawn`, `withdrawnAt`) | Aplicación (HU-15, extendido) | Señal explícita de retiro en el detalle |
+| `GetSegmentedFeed` (exclusión por `withdrawnAt`) | Aplicación (feed, extendido) | Exclusión del feed |
+
+### Criterios de aceptación y pruebas (HU-50)
+
+| Criterio | Descripción | Prueba correspondiente |
+|---|---|---|
+| 1 | El administrador crea una convocatoria con los mismos campos que produce el proceso automático | `tests/ingestion/PublishConvocatoria.test.ts` (`criterio 1: ...`) |
+| 2 | Una convocatoria manual publicada entra al mismo flujo de segmentación y notificación que una ingerida | `tests/ingestion/PublishConvocatoria.test.ts` (`criterio 2: ...`) |
+| 3 | Una convocatoria retirada deja de ser visible en la siguiente sincronización | `tests/ingestion/WithdrawConvocatoria.test.ts` (`criterio 3: ...`), `tests/feed/ConvocatoriaWithdrawnExclusion.test.ts` |
+| 4 | Los avisos programados pendientes de una convocatoria retirada se cancelan | `tests/ingestion/WithdrawConvocatoria.test.ts` (`criterio 4: ...`) |
+| 5 | Un estudiante que abre una convocatoria retirada que tenía guardada recibe aviso explícito, no contenido roto | `tests/application/GetConvocatoriaDetail.test.ts` (`HU-50, criterio 5: ...`) |
+| 6 | Toda publicación o retiro queda auditado con usuario, acción, objeto afectado y marca de tiempo | `tests/ingestion/PublishConvocatoria.test.ts` (`criterio 6: ...`), `tests/ingestion/WithdrawConvocatoria.test.ts` (`criterio 6: ...`), `tests/infrastructure/mongo/MongoConvocatoriaAuditLog.integration.test.ts` |
+| — | Retirar una convocatoria ya retirada se rechaza explícitamente (no es un no-op silencioso) | `tests/ingestion/WithdrawConvocatoria.test.ts` |
+| — | Un reenvío no revierte un retiro | Documentado arriba; cubierto indirectamente por `IngestInstitutionalMessages` conservando `existing.withdrawnAt` |
+| — | Persistencia real de `withdrawnAt` y del log de auditoría | `tests/infrastructure/mongo/MongoConsolidatedMessageRegistry.integration.test.ts`, `tests/infrastructure/mongo/MongoConvocatoriaAuditLog.integration.test.ts` |
+| — | Dominio desacoplado de infraestructura | `npm run check:architecture` |
+| — | Operaciones declaradas en el catálogo de roles | `npm run check:authorization` |
 
 ## HU-53 — Verificación del aislamiento del dominio (RNF-41, RNF-42)
 

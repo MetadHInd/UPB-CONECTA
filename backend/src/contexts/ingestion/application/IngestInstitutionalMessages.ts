@@ -183,7 +183,8 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
         lastSentAt: normalized.sentAt,
         resendCount: 0,
         dueDate,
-        applicationLink
+        applicationLink,
+        withdrawnAt: null
       });
       return;
     }
@@ -198,7 +199,10 @@ export class IngestInstitutionalMessages implements IngestInstitutionalMessagesP
       lastSentAt: normalized.sentAt,
       resendCount: existing.resendCount + 1,
       dueDate: decision.kind === 'update-body' ? dueDate : existing.dueDate,
-      applicationLink: decision.kind === 'update-body' ? applicationLink : existing.applicationLink
+      applicationLink: decision.kind === 'update-body' ? applicationLink : existing.applicationLink,
+      // HU-50: un reenvio no resucita automaticamente una convocatoria que un
+      // administrador retiro — eso deshacia su decision en silencio.
+      withdrawnAt: existing.withdrawnAt
     });
   }
 
