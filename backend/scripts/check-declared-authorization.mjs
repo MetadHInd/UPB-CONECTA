@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 const DEFAULT_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 /** Verbos administrativos conocidos. No exhaustivo — ver limite explicito arriba. */
-const ADMIN_VERB_PATTERN = /^(Manage|Correct|Quarantine|Review|Moderate|Approve|Reject|Suspend|Withdraw|Publish|Delete|Ban|Admin)/;
+const ADMIN_VERB_PATTERN = /^(Manage|Correct|Quarantine|Review|Moderate|Approve|Reject|Suspend|Withdraw|Publish|Discard|Delete|Ban|Admin)/;
 
 const CLASS_EXPORT_PATTERN = /export class ([A-Za-z0-9]+)/g;
 

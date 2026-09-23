@@ -38,4 +38,9 @@ export class MongoQuarantineRepository implements QuarantineRepositoryPort {
     const found = await this.collection.findOne({ _id: mailboxUid });
     return found ? toRecord(found) : null;
   }
+
+  async findAll(): Promise<readonly QuarantinedMessage[]> {
+    const docs = await this.collection.find({}).toArray();
+    return docs.map(toRecord);
+  }
 }
