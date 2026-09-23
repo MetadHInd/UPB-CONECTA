@@ -117,6 +117,9 @@ jobs:
       - name: Regla de dependencia hexagonal (RNF-41)
         run: npm run check:architecture
 
+      - name: Operaciones administrativas sin rol declarado (HU-46, RNF-18)
+        run: npm run check:authorization
+
       - name: Tests (unitarios + integración contra MongoDB real) y cobertura (umbral 80%)
         run: npm run test:coverage
 

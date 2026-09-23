@@ -1,0 +1,6 @@
+{
+  "operations": [
+    { "operation": "ManageTopics", "requiredRole": "content-admin" },
+    { "operation": "CorrectClassification", "requiredRole": "content-admin" }
+  ]
+}

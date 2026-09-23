@@ -2,7 +2,7 @@
 
 ## Propósito
 
-Este contexto atiende la HU-43 (autenticación de estudiantes contra el directorio institucional) y la HU-45 (expiración de sesión y rotación de refresh token). Ver la sección [HU-45](#hu-45--expiración-de-sesión-y-rotación-de-refresh-token).
+Este contexto atiende la HU-43 (autenticación de estudiantes contra el directorio institucional), la HU-45 (expiración de sesión y rotación de refresh token) y la HU-46 (control de acceso por rol verificado en servidor). Ver las secciones [HU-45](#hu-45--expiración-de-sesión-y-rotación-de-refresh-token) y [HU-46](#hu-46--control-de-acceso-por-rol-verificado-en-servidor-rf-76-rnf-14-rnf-18).
 
 La política del backend es explícita:
 
@@ -168,3 +168,63 @@ HU-45 cumple sus seis criterios, pero estos tres huecos quedan abiertos de forma
 | 6 | Token manipulado o con firma inválida se rechaza y se registra | `SessionLifecycle.test.ts` › criterio 6 (payload alterado, `exp` extendido, otro secreto, basura; el log no contiene el token); `JoseTokenSigningAdapter.test.ts` (`alg: none`, otra audiencia, claims faltantes, tipo equivocado) |
 
 Repositorio Mongo: `tests/infrastructure/mongo/MongoRefreshTokenRepository.integration.test.ts` corre contra una instancia real (índices, `markUsed` atómico con dos llamadas concurrentes, `revokeChain` limitado a su cadena, idempotencia del motivo).
+
+## HU-46 — control de acceso por rol verificado en servidor (RF-76, RNF-14, RNF-18)
+
+### Alcance
+
+Cada operación administrativa verifica en el servidor el rol de quien la invoca, no solo en la interfaz. Un catálogo de roles (`Role.STUDENT` y `Role.CONTENT_ADMIN`, ver criterio 4) y un catálogo de operaciones protegidas declaran explícitamente qué rol requiere cada caso de uso; un intento no autorizado queda auditado con usuario, operación, origen y momento; el rol de una cuenta se puede cambiar y ese cambio también queda auditado.
+
+**No hay servidor HTTP en este repositorio, y eso no bloquea la historia** — mismo patrón que HU-45 y HU-30. El diseño de la historia en Jira es explícito: *"la autorización se ejecuta en el adaptador de entrada como política declarativa por caso de uso; el dominio expone qué rol requiere cada caso de uso, el adaptador lo hace cumplir."* `AuthorizeOperation` es exactamente ese punto de enganche: lo que un middleware futuro llamará antes de ejecutar cualquier operación administrativa.
+
+### Catálogo de operaciones protegidas: dato externo, no código
+
+`config/protected-operations.json` (mismo patrón que `config/program-catalog.json` de HU-07): una lista `{ operation, requiredRole }`. Se eligió un archivo JSON en vez de una constante TypeScript por una razón puntual — `scripts/check-declared-authorization.mjs` (criterio 5) necesita leerlo con Node plano, sin pasar por el compilador de TypeScript, igual que `check-architecture.mjs` nunca importa el código que analiza, solo lee su texto. Un archivo JSON compartido evita duplicar el catálogo entre el runtime (TypeScript) y el script de análisis.
+
+Hoy el catálogo declara dos operaciones: `ManageTopics` (HU-30, forum) y `CorrectClassification` (HU-11, classification, fusionada a `main` durante el desarrollo de esta misma historia) → ambas `content-admin`. **No se retroactivaron controles de rol sobre el resto de casos de uso administrativos ya existentes** (`SimulatePostProcessingRule` de HU-09, los métodos de administración de `PostProcessingRuleRepositoryPort`, `ReviewThresholdConfigPort`) — hacerlo es un cambio mecánico pero amplio, contexto por contexto, y esta historia entrega el mecanismo, no la migración completa. Agregar cada uno es una línea en el JSON; queda como trabajo explícitamente pendiente. `scripts/check-declared-authorization.mjs` no los marca como hallazgo porque sus nombres no coinciden con ningún verbo administrativo conocido — es exactamente el límite del heurístico, documentado más abajo.
+
+### Decisión: jerarquía mínima de dos roles, no una matriz de permisos
+
+`AuthorizationPolicy.authorize(actualRole, requiredRole)` (dominio puro, sin I/O, mismo estilo que `decidePublicationStatus` de HU-10) compara un rango: `CONTENT_ADMIN` (1) domina a `STUDENT` (0). Un administrador de contenido también es una cuenta autenticada — no tiene sentido que pueda gestionar el foro pero no consultar su propio feed. La historia solo pide distinguir dos roles (criterio 4); si aparece un tercero sin esta relación de contención (por ejemplo, un rol lateral sin privilegios de estudiante), esta jerarquía deja de alcanzar y hace falta una matriz de permisos explícita por operación.
+
+### `AuthorizeOperation`: el punto de enganche (criterios 1, 2 y 3)
+
+Recibe `{ subject, operation, origin }`, resuelve el rol requerido desde el catálogo, lee el rol actual de la cuenta (`AccountRoleRepositoryPort.findBySubject`, `Role.STUDENT` por defecto si no hay registro — **ninguna cuenta es administradora por omisión**), y aplica `AuthorizationPolicy`. Si la operación invocada no está en el catálogo, **falla explícitamente** (`UnknownProtectedOperationError`) en vez de tratarla como "sin restricción": el catálogo es la única fuente de verdad, y un catálogo desactualizado no debe abrir en silencio una operación que debía quedar protegida. Un intento rechazado se audita (`AuthorizationAuditLogPort`, criterio 3); uno autorizado no genera ruido en el log.
+
+### `ChangeAccountRole` (criterio 6)
+
+Cambia el rol de una cuenta (upsert por `subject` en `AccountRoleRepositoryPort`) y audita el cambio con el rol anterior, el nuevo y quién lo aplicó. "Surte efecto en la siguiente petición" se cumple sin ningún mecanismo adicional: `AuthorizeOperation` nunca cachea el rol, lo lee fresco en cada llamada — mismo principio que el umbral de revisión de HU-10 ("leído en cada ejecución, nunca cacheado").
+
+### Análisis de seguridad (criterio 5): `scripts/check-declared-authorization.mjs`
+
+Mismo espíritu que `check-architecture.mjs` (RNF-41): convertir una regla que depende de que alguien se acuerde en una condición que rompe la construcción si no se cumple. Escanea las clases exportadas en `src/contexts/*/application/*.ts`; si el nombre de una clase coincide con un verbo administrativo conocido (`Manage`, `Correct`, `Quarantine`, `Review`, `Moderate`, `Approve`, `Reject`, `Suspend`, `Withdraw`, `Publish`, `Delete`, `Ban`, `Admin`) y no aparece en `config/protected-operations.json`, lo reporta como hallazgo.
+
+**Límite explícito, documentado en el propio script**: esto es un patrón de nombres, no un análisis semántico. Un caso de uso administrativo cuyo nombre no calce con la lista de verbos pasaría sin marcarse — la lista se amplía a mano cuando aparece un caso así. Es la misma clase de limitación que ya acepta `check-architecture.mjs` (un regex sobre el contenido del archivo, no un parser real).
+
+Conectado a `npm run check:authorization` y al job `build-and-test` de CI, igual que `check:architecture`.
+
+### Puertos y adaptadores nuevos
+
+| Pieza | Capa | Rol |
+|---|---|---|
+| `Role`, `ROLES`, `isRole` | Dominio (`value-objects`) | Catálogo de roles (criterio 4) |
+| `ProtectedOperationsCatalogPort` (`ProtectedOperationsCatalog`, `requiredRoleFor`) | Dominio (`ports/out`, dato) | Qué rol requiere cada operación — mismo patrón que `ProgramCatalogPort` de targeting |
+| `AccountRoleRepositoryPort` | Puerto | Rol vigente de una cuenta, upsert por `subject` |
+| `AuthorizationAuditLogPort` | Puerto | Intentos no autorizados y cambios de rol, append-only |
+| `AuthorizationPolicy.authorize` | Dominio (`services`) | Decisión pura de autorización |
+| `AuthorizeOperation`, `ChangeAccountRole` | Aplicación | Casos de uso (criterios 1, 2, 3, 6) |
+| `InMemory*`/`Mongo*AccountRoleRepository`, `*AuthorizationAuditLog` | Infraestructura | `identity_account_roles`, `identity_authorization_audit` (Mongo) |
+| `loadProtectedOperationsCatalog` | Infraestructura (`config`) | Lee `config/protected-operations.json`, mismo patrón que `loadProgramCatalog` |
+
+### Criterios de aceptación y pruebas (HU-46)
+
+| Criterio | Descripción | Prueba correspondiente |
+|---|---|---|
+| 1 | El servidor verifica el rol del solicitante antes de ejecutar cualquier operación administrativa | `tests/identity/AuthorizeOperation.test.ts` (`criterio 1: ...`), `tests/identity/AuthorizationPolicy.test.ts` |
+| 2 | Un estudiante que invoca directamente un punto de entrada administrativo se rechaza, aunque la interfaz nunca se lo haya mostrado | `tests/identity/AuthorizeOperation.test.ts` (`criterio 2: ...`) |
+| 3 | Un intento no autorizado queda registrado con usuario, operación, origen y marca de tiempo | `tests/identity/AuthorizeOperation.test.ts` (`criterio 3: ...`), `tests/infrastructure/mongo/MongoAccountRoleAndAuthorizationAudit.integration.test.ts` |
+| 4 | El catálogo de roles distingue al menos estudiante y administrador de contenido, con permisos declarados de forma explícita | `src/contexts/identity/domain/value-objects/Role.ts`, `config/protected-operations.json` |
+| 5 | Una operación sin verificación de rol declarada se detecta como hallazgo antes del despliegue | `tests/infrastructure/check-declared-authorization.test.ts` |
+| 6 | Un cambio de rol surte efecto en la siguiente petición y queda auditado | `tests/identity/ChangeAccountRole.test.ts` (`criterio 6` y `surte efecto en la siguiente peticion...`) |
+| — | Persistencia real del rol de cuenta y de la auditoría | `tests/infrastructure/mongo/MongoAccountRoleAndAuthorizationAudit.integration.test.ts` |
+| — | Dominio desacoplado de infraestructura | `npm run check:architecture` |
