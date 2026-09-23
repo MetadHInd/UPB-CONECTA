@@ -43,5 +43,14 @@ export interface ConsolidatedMessageRegistryPort {
   /** HU-15: busqueda directa por identidad estable, para la vista de detalle. */
   findById(id: ConvocatoriaId): Promise<ConsolidatedMessageRecord | null>;
 
+  /**
+   * HU-49: resuelve el grupo consolidado a partir del `messageId` de su
+   * representante — la clasificacion (HU-06+) y el targeting (HU-07) solo
+   * conocen ese id, no el `ConvocatoriaId` compuesto. Complementaria a
+   * `findById`, no lo reemplaza: cada una resuelve la identidad que su
+   * llamador ya tiene a mano.
+   */
+  findByRepresentativeMessageId(messageId: string): Promise<ConsolidatedMessageRecord | null>;
+
   save(record: ConsolidatedMessageRecord): Promise<void>;
 }

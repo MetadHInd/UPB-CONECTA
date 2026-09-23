@@ -4,4 +4,6 @@ export interface QuarantineRepositoryPort {
   save(message: QuarantinedMessage): Promise<void>;
   /** Criterio 3: permite consultar el contenido crudo original para diagnostico. */
   findByUid(mailboxUid: number): Promise<QuarantinedMessage | null>;
+  /** HU-49, criterio 1: fuente de la cola unificada de revision. */
+  findAll(): Promise<readonly QuarantinedMessage[]>;
 }
