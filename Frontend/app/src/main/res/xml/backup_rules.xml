@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 y anteriores. La caché de convocatorias (HU-17) es una copia
+     descartable del servidor ligada a la sesión: no se respalda, para que una
+     restauración no traiga datos que el cierre de sesión habría borrado. -->
 <full-backup-content>
-    <!-- Sin reglas específicas todavía: este front preliminar no persiste
-         datos de usuario en disco (todo es en memoria / simulado). -->
+    <exclude domain="database" path="upb_conecta.db" />
+    <exclude domain="database" path="upb_conecta.db-shm" />
+    <exclude domain="database" path="upb_conecta.db-wal" />
 </full-backup-content>

@@ -12,6 +12,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -20,15 +22,27 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import co.edu.upb.conecta.data.cache.EstadoSincronizacion
+import co.edu.upb.conecta.data.conectividad.ConnectivityObserver
 import co.edu.upb.conecta.data.repository.ConvocatoriasRepository
+import co.edu.upb.conecta.domain.conectividad.AccionConRed
 import co.edu.upb.conecta.ui.components.ChipPrograma
+import co.edu.upb.conecta.ui.components.DialogoAccionRequiereRed
 import co.edu.upb.conecta.ui.components.EstadoVacio
+import co.edu.upb.conecta.ui.components.IndicadorActualizacion
 import co.edu.upb.conecta.ui.components.InsigniaUrgencia
+import co.edu.upb.conecta.ui.components.rememberEjecutorAccionConRed
+import kotlinx.coroutines.flow.StateFlow
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -39,10 +53,19 @@ private val formatoFechaLarga = DateTimeFormatter.ofPattern("d 'de' MMMM 'de' yy
 fun ConvocatoriaDetalleScreen(
     id: String,
     convocatoriasRepository: ConvocatoriasRepository,
+    conectividad: ConnectivityObserver,
     onVolver: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    estadoSincronizacion: StateFlow<EstadoSincronizacion>? = null
 ) {
-    val convocatoria = remember(id) { convocatoriasRepository.obtenerPorId(id) }
+    val convocatorias by remember(convocatoriasRepository) { convocatoriasRepository.observarTodas() }
+        .collectAsState(initial = remember(convocatoriasRepository) { convocatoriasRepository.obtenerTodas() })
+    val convocatoria = remember(id, convocatorias) { convocatorias.firstOrNull { it.id == id } }
+    val estado = estadoSincronizacion?.collectAsState()?.value
+
+    val ejecutorConRed = rememberEjecutorAccionConRed(conectividad)
+    var mostrarPostulacionPendiente by remember { mutableStateOf(false) }
+    DialogoAccionRequiereRed(ejecutorConRed)
 
     Scaffold(
         modifier = modifier,
@@ -69,6 +92,10 @@ fun ConvocatoriaDetalleScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
+            // HU-17: al revisar un plazo sin red, que quede claro de cuándo es el dato.
+            if (estado != null && !estado.hayConexion) {
+                IndicadorActualizacion(estado, modifier = Modifier.padding(bottom = 12.dp))
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -109,6 +136,37 @@ fun ConvocatoriaDetalleScreen(
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
+
+            // Ejemplo real del aviso "acción requiere red" (HU-17, criterio 4).
+            // La postulación en sí es de otra historia: con red solo se informa.
+            Button(
+                onClick = {
+                    ejecutorConRed.ejecutar(AccionConRed.POSTULAR_CONVOCATORIA) {
+                        mostrarPostulacionPendiente = true
+                    }
+                },
+                enabled = !convocatoria.yaCerro(),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (convocatoria.yaCerro()) "Convocatoria cerrada" else "Postularme")
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        if (mostrarPostulacionPendiente) {
+            AlertDialog(
+                onDismissRequest = { mostrarPostulacionPendiente = false },
+                title = { Text("Postulación desde la app") },
+                text = {
+                    Text(
+                        "La postulación desde UPB Conecta todavía no está disponible. Por ahora " +
+                            "sigue el procedimiento de la fuente original: ${convocatoria.fuenteOriginal}."
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { mostrarPostulacionPendiente = false }) { Text("Entendido") }
+                }
+            )
         }
     }
 }

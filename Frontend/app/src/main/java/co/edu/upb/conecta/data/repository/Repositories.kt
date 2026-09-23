@@ -1,7 +1,19 @@
 package co.edu.upb.conecta.data.repository
 
+import android.content.Context
+import co.edu.upb.conecta.data.cache.CachedConvocatoriasRepository
+import co.edu.upb.conecta.data.conectividad.AndroidConnectivityObserver
+import co.edu.upb.conecta.data.conectividad.ConnectivityObserver
+import co.edu.upb.conecta.data.local.RoomCacheLocalConvocatorias
+import co.edu.upb.conecta.data.local.UpbConectaDatabase
 import co.edu.upb.conecta.data.mock.MockData
+import co.edu.upb.conecta.data.sesion.SesionLocal
 import co.edu.upb.conecta.domain.model.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 
 /**
  * Repositorios de este front preliminar.
@@ -16,6 +28,14 @@ import co.edu.upb.conecta.domain.model.*
 interface ConvocatoriasRepository {
     fun obtenerTodas(): List<Convocatoria>
     fun obtenerPorId(id: String): Convocatoria?
+
+    /**
+     * Lista observable, para pantallas que deben refrescarse cuando el dato
+     * cambia (p. ej. al terminar una sincronización, HU-17). Por defecto
+     * emite una sola vez [obtenerTodas], así que una fuente que no cambia
+     * sola no tiene que implementarlo.
+     */
+    fun observarTodas(): Flow<List<Convocatoria>> = flow { emit(obtenerTodas()) }
 }
 
 class FakeConvocatoriasRepository : ConvocatoriasRepository {
@@ -157,7 +177,37 @@ class FakeAuthRepository(private val usuarioRepository: UsuarioRepository) : Aut
  * punto natural para introducir inyección de dependencias.
  */
 object AppContainer {
-    val convocatoriasRepository: ConvocatoriasRepository = FakeConvocatoriasRepository()
+    /** Vive lo que vive el proceso: sincronización y conectividad (HU-17). */
+    private val scopeAplicacion = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    lateinit var conectividad: ConnectivityObserver
+        private set
+
+    /**
+     * Convocatorias con caché sin conexión (HU-17). Las pantallas lo ven
+     * como un [ConvocatoriasRepository] más.
+     */
+    lateinit var convocatorias: CachedConvocatoriasRepository
+        private set
+    val convocatoriasRepository: ConvocatoriasRepository get() = convocatorias
+
+    lateinit var sesionLocal: SesionLocal
+        private set
+
+    /** Lo llama `UPBConectaApp.onCreate()`: Room y la red necesitan un Context. */
+    fun inicializar(context: Context) {
+        conectividad = AndroidConnectivityObserver(context, scopeAplicacion)
+        convocatorias = CachedConvocatoriasRepository(
+            // La "red" detrás de la caché. Cuando exista, esta es la línea que
+            // pasa a ser HttpConvocatoriasRepository (ARQUITECTURA-INTEGRACION.md §7).
+            remoto = FakeConvocatoriasRepository(),
+            cacheLocal = RoomCacheLocalConvocatorias(UpbConectaDatabase.crear(context).convocatoriasCacheDao()),
+            conectividad = conectividad,
+            scope = scopeAplicacion
+        )
+        sesionLocal = SesionLocal(listOf(convocatorias))
+    }
+
     val practicasRepository: PracticasRepository = FakePracticasRepository()
     val noticiasRepository: NoticiasRepository = FakeNoticiasRepository()
     val foroRepository: ForoRepository = FakeForoRepository()

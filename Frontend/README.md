@@ -50,3 +50,33 @@ Toda la app usa **datos de ejemplo** (`data/mock/MockData.kt`) — nombres, empr
 2. Reemplazar `data/mock/MockData.kt` por adaptadores reales contra el backend a medida que se implementen los contextos `classification`, `feed`, `moderation`, etc.
 3. Cambiar el mapa esquemático por un mapa real cuando exista el plano/API.
 4. Sustituir la paleta de colores por el manual de marca oficial (códigos hexadecimales exactos).
+
+## HU-17 — Consulta sin conexión de convocatorias sincronizadas
+
+Trazabilidad: RF-25, RNF-10, RNF-40, RF-64 · CU-02 excepción E1. Encaja en el plan de `ARQUITECTURA-INTEGRACION.md` (sección 7).
+
+**Alcance.** Caché local de convocatorias con Room, indicador de última actualización en el feed, sincronización al recuperar la red, aviso reutilizable para acciones que requieren red y borrado de la caché al cerrar sesión. **No incluye** cliente HTTP (la fuente "remota" sigue siendo `FakeConvocatoriasRepository`), ni la postulación ni la publicación en el foro reales (son de otras historias), ni caché de prácticas, noticias o foro.
+
+| Criterio | Dónde |
+|---|---|
+| 1. Contenido consultable sin red | `data/cache/CachedConvocatoriasRepository.kt` lee siempre de `data/local/` (Room); la red solo alimenta el disco. |
+| 2. Fecha y hora de la última actualización | Se guarda explícitamente en `sincronizacion_cache` en la misma transacción que los datos. Se muestra con `ui/components/IndicadorActualizacion.kt` en Inicio (pestaña Convocatorias) y en el detalle. |
+| 3. Sincronización al volver la red | `data/conectividad/AndroidConnectivityObserver.kt` (`NetworkCallback`) + `CachedConvocatoriasRepository.activar()`. |
+| 4. Acción que requiere red | `domain/conectividad/AccionConRed.kt` + `ui/components/AccionRequiereRed.kt`. Ejemplo real: botón "Postularme" del detalle de convocatoria. |
+| 5. Borrado al cerrar sesión | `data/sesion/SesionLocal.kt`, llamado desde "Cerrar sesión" en Perfil. |
+
+**Decisiones:**
+
+- **Offline-first, no "leer de Room solo si no hay red".** Las pantallas leen siempre de la caché, con o sin red. Así no hay dos caminos que puedan mostrar cosas distintas, y la llamada remota nunca corre en el hilo principal.
+- **`NetworkCallback` en vez de WorkManager.** El criterio 3 habla de la app detectando la red. El callback reacciona al instante y además da el estado de red que necesitan el indicador y el aviso de acciones. WorkManager sirve para sincronizar con la app cerrada, que esta historia no pide; si se necesita, se agrega un `CoroutineWorker` que llame a `sincronizar()`.
+- **Puertos propios** (`ConnectivityObserver`, `CacheLocalConvocatorias`, `CacheDeSesion`): la lógica se prueba en JVM con dobles, sin emulador.
+- **Contrato de `ConvocatoriasRepository` sin cambios incompatibles.** Solo se agregó `observarTodas()` con implementación por defecto (emite `obtenerTodas()` una vez), así que `FakeConvocatoriasRepository` y un futuro `HttpConvocatoriasRepository` no tienen que implementarlo.
+- **Sesión.** La sincronización se activa al iniciar sesión (también como invitado) y se detiene y borra al cerrarla, para que un cambio de red en la pantalla de login no vuelva a llenar la caché.
+- **Esquema descartable.** `exportSchema = false` y migración destructiva: todo lo que guarda Room es copia del servidor.
+- **Fuera del respaldo de Android.** `res/xml/backup_rules.xml` y `data_extraction_rules.xml` excluyen `upb_conecta.db`, para que una restauración o un cambio de teléfono no traigan una caché que el cierre de sesión habría borrado.
+
+**Cómo probarlo a mano:** inicia sesión con red y abre Inicio ("Actualizado hoy a las…"). Activa el modo avión: el feed sigue ahí con el aviso "Sin conexión" y la fecha. Toca "Postularme" en una convocatoria y verás el aviso con "Reintentar". Quita el modo avión: el indicador pasa a "Actualizando…" y luego se actualiza la hora. Cierra sesión y vuelve a entrar sin red: no hay convocatorias guardadas.
+
+**Verificación:** `./gradlew assembleDebug`, `./gradlew test` y `./gradlew lint` pasan (lint sin errores). Gradle 8.14 necesita **JDK 17 o 21** para ejecutarse: el JBR 25 que trae Android Studio reciente falla con el mensaje `25.0.3` a secas. En Android Studio, *Settings → Build Tools → Gradle → Gradle JDK*.
+
+**Pruebas unitarias** (`./gradlew test`, en `app/src/test/`): sincronización con y sin red, reconexión, fallo remoto (se conservan datos y fecha), borrado al cerrar sesión, textos del indicador según red y antigüedad, política de acción con red y el mapeo a las tablas de Room.
