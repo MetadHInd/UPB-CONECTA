@@ -1,5 +1,7 @@
 # Arquitectura de integración — UPB Conecta (front Android ↔ back Node/TypeScript)
 
+> **Nota de actualización (HU-17, sep. 2026):** el párrafo siguiente describe el backend tal como estaba al escribir este documento. Hoy `backend/src/contexts/` ya tiene `classification`, `consent`, `feed`, `forum`, `identity`, `ingestion`, `notifications`, `profile` y `targeting`, pero **sigue sin framework HTTP ni endpoints**, así que el plan de integración de abajo sigue vigente. La sección 7 describe cómo encaja la caché sin conexión que agregó HU-17.
+
 Revisé el zip nuevo del backend (`UPBCONECTAmain.zip`) contra el que ya tenía: **es idéntico**, no hay cambios de código. Sigue implementando solo HU-01 (ingesta programada e idempotente al buzón institucional, escribiendo a MongoDB) y `package.json` solo tiene `mongodb` como dependencia de producción — **todavía no hay ningún framework HTTP instalado ni ningún endpoint expuesto**. Eso es el dato que más importa para responder tu pregunta: hoy el backend no es un servicio con el que el front pueda hablar, es un proceso de ingesta que llena una base de datos. La arquitectura que necesitas es, sobre todo, la que le agrega esa "puerta de salida" hacia el móvil sin romper lo que ya tienes.
 
 ## Resumen de la recomendación
@@ -81,3 +83,23 @@ Para que backend y front avancen en paralelo sin bloquearse el uno al otro (tú,
 6. Notificaciones push al final, porque depende de que ya existan convocatorias reales con fecha de cierre confiable.
 
 Con esto los dos proyectos siguen exactamente como los separaste desde el principio — cada uno en su propia carpeta, cada uno con su propio ciclo de vida — y el "front preliminar" que ya tienes no se reescribe: se le conecta un cable.
+
+## 7. Caché sin conexión de convocatorias (HU-17)
+
+HU-17 agregó, **antes** de que exista `HttpConvocatoriasRepository`, la capa que va a quedar entre ese repositorio y las pantallas. No cambia el orden de la sección 6; aclara qué hace el paso 3:
+
+```
+Pantallas ──▶ ConvocatoriasRepository (puerto, sin cambios incompatibles)
+                   ▲
+     CachedConvocatoriasRepository  ── lee siempre de ──▶ CacheLocalConvocatorias (puerto)
+       │  sincroniza cuando hay red                         └─ RoomCacheLocalConvocatorias (Room)
+       ├─ remoto: ConvocatoriasRepository  ← hoy FakeConvocatoriasRepository, mañana HttpConvocatoriasRepository
+       └─ ConnectivityObserver (puerto)    ← AndroidConnectivityObserver (NetworkCallback)
+```
+
+- **El paso 3 sigue siendo una línea**, pero la línea cambia de sitio: en `AppContainer.inicializar()` se reemplaza `remoto = FakeConvocatoriasRepository()` por `remoto = HttpConvocatoriasRepository(...)`. La caché, el indicador de última actualización y el borrado al cerrar sesión no se tocan.
+- **`HttpConvocatoriasRepository` puede ser bloqueante** (Retrofit con `execute()`): la caché siempre lo llama en `Dispatchers.IO` y las pantallas leen del disco, nunca de la red. Si se prefiere `suspend`, el cambio queda dentro de `CachedConvocatoriasRepository.sincronizar()`.
+- **Errores de red**: el `Result`/`Recurso<T>` que propone la sección 2 ya no hace falta para convocatorias: si la llamada remota lanza una excepción, la caché conserva los datos y la marca de tiempo anteriores y el indicador del feed muestra "No se pudieron actualizar". Sigue siendo útil para las acciones de escritura.
+- **Acciones que requieren red** (postular, publicar en el foro): se validan con `PoliticaAccionConRed` + `rememberEjecutorAccionConRed`/`DialogoAccionRequiereRed` antes de llamar al repositorio HTTP de escritura que traiga cada historia.
+- **Sesión**: `SesionLocal` activa la sincronización al iniciar sesión y borra la caché al cerrarla. Cuando exista el contexto de identidad (sección 3), el token también se borra desde ahí.
+- Para cachear prácticas o noticias se repite el patrón: un `Cached*Repository` que implemente `CacheDeSesion` y se registre en la lista de `SesionLocal`.

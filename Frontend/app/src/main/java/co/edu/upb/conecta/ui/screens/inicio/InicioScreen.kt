@@ -20,6 +20,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import co.edu.upb.conecta.data.cache.EstadoSincronizacion
 import co.edu.upb.conecta.data.repository.ConvocatoriasRepository
 import co.edu.upb.conecta.data.repository.PracticasRepository
 import co.edu.upb.conecta.domain.model.Convocatoria
@@ -35,6 +37,8 @@ import co.edu.upb.conecta.domain.model.Practica
 import co.edu.upb.conecta.domain.model.Programa
 import co.edu.upb.conecta.ui.components.ChipPrograma
 import co.edu.upb.conecta.ui.components.EstadoVacio
+import co.edu.upb.conecta.ui.components.IndicadorActualizacion
+import kotlinx.coroutines.flow.StateFlow
 import co.edu.upb.conecta.ui.components.InsigniaUrgencia
 
 @Composable
@@ -43,9 +47,12 @@ fun InicioScreen(
     practicasRepository: PracticasRepository,
     onAbrirConvocatoria: (String) -> Unit,
     onAbrirPractica: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    estadoSincronizacion: StateFlow<EstadoSincronizacion>? = null
 ) {
-    val convocatorias = remember { convocatoriasRepository.obtenerTodas() }
+    val convocatorias by remember(convocatoriasRepository) { convocatoriasRepository.observarTodas() }
+        .collectAsState(initial = remember(convocatoriasRepository) { convocatoriasRepository.obtenerTodas() })
+    val estado = estadoSincronizacion?.collectAsState()?.value
     val practicas = remember { practicasRepository.obtenerTodas() }
 
     var pestanaSeleccionada by remember { mutableStateOf(0) }
@@ -84,6 +91,10 @@ fun InicioScreen(
         }
 
         if (pestanaSeleccionada == 0) {
+            // HU-17: fecha y hora de la última actualización, destacada si no hay red.
+            if (estado != null) {
+                IndicadorActualizacion(estado, modifier = Modifier.padding(top = 8.dp))
+            }
             if (convocatoriasFiltradas.isEmpty()) {
                 EstadoVacio("No hay convocatorias para este programa por ahora.")
             } else {

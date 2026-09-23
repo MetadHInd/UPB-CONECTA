@@ -23,6 +23,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,6 +55,7 @@ import co.edu.upb.conecta.ui.screens.notificaciones.NotificacionesScreen
 import co.edu.upb.conecta.ui.screens.perfil.PerfilScreen
 import co.edu.upb.conecta.ui.screens.splash.SplashScreen
 import co.edu.upb.conecta.ui.theme.UpbGradienteMarca
+import kotlinx.coroutines.launch
 
 private val rutasConBarraInferior = destinosBarraInferior.map { it.ruta }.toSet()
 private val rutasConFabChatbot = setOf(Rutas.INICIO, Rutas.NOTICIAS, Rutas.FORO)
@@ -66,6 +68,7 @@ fun UPBConectaNavHost() {
     val rutaActual = backStackEntry?.destination?.route
 
     val esPantallaPrincipal = rutaActual in rutasConBarraInferior
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -170,6 +173,7 @@ fun UPBConectaNavHost() {
                 LoginScreen(
                     authRepository = AppContainer.authRepository,
                     onLoginExitoso = {
+                        AppContainer.sesionLocal.alIniciarSesion()
                         navController.navigate(Rutas.INICIO) {
                             popUpTo(Rutas.LOGIN) { inclusive = true }
                         }
@@ -181,7 +185,8 @@ fun UPBConectaNavHost() {
                     convocatoriasRepository = AppContainer.convocatoriasRepository,
                     practicasRepository = AppContainer.practicasRepository,
                     onAbrirConvocatoria = { id -> navController.navigate(Rutas.convocatoriaDetalle(id)) },
-                    onAbrirPractica = { id -> navController.navigate(Rutas.practicaDetalle(id)) }
+                    onAbrirPractica = { id -> navController.navigate(Rutas.practicaDetalle(id)) },
+                    estadoSincronizacion = AppContainer.convocatorias.estadoSincronizacion
                 )
             }
             composable(Rutas.NOTICIAS) {
@@ -200,8 +205,12 @@ fun UPBConectaNavHost() {
                 PerfilScreen(
                     usuarioRepository = AppContainer.usuarioRepository,
                     onCerrarSesion = {
-                        navController.navigate(Rutas.LOGIN) {
-                            popUpTo(0) { inclusive = true }
+                        // HU-17: la caché local no sobrevive al cierre de sesión.
+                        scope.launch {
+                            AppContainer.sesionLocal.alCerrarSesion()
+                            navController.navigate(Rutas.LOGIN) {
+                                popUpTo(0) { inclusive = true }
+                            }
                         }
                     }
                 )
@@ -214,7 +223,9 @@ fun UPBConectaNavHost() {
                 ConvocatoriaDetalleScreen(
                     id = id,
                     convocatoriasRepository = AppContainer.convocatoriasRepository,
-                    onVolver = { navController.popBackStack() }
+                    conectividad = AppContainer.conectividad,
+                    onVolver = { navController.popBackStack() },
+                    estadoSincronizacion = AppContainer.convocatorias.estadoSincronizacion
                 )
             }
             composable(
