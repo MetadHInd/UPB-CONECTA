@@ -1,0 +1,5 @@
+{
+  "policies": [
+    { "operation": "CreatePost", "limit": 5, "windowMs": 60000 }
+  ]
+}
