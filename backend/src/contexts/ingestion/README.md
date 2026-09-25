@@ -7,7 +7,7 @@ Implementacion de **HU-01 (SCRUM-13): Conexion programada e idempotente al buzon
 **HU-03 (SCRUM-15): Deduplicacion por contenido dentro de ventana temporal configurable**,
 **HU-04 (SCRUM-16): Cuarentena de mensajes no procesables y bitacora de ingesta** (criterios 1-4; criterio 5 diferido, ver seccion propia),
 **HU-08 (SCRUM-20): Extraccion de fecha de cierre y enlace de postulacion**,
-**HU-55 (SCRUM-67): Rendimiento bajo carga y degradacion controlada** (criterios 3 y 4, parciales; el resto diferido, ver seccion propia) y
+**HU-55 (SCRUM-67): Rendimiento bajo carga y degradacion controlada** (criterios 2, 3, 4 y 6 — 3 y 4 parciales; 1, 5 y 7 diferidos, ver seccion propia) y
 **HU-15 (SCRUM-27): Vista de detalle de la convocatoria** (criterios 1-4; criterio 5 diferido, depende de HU-24) y
 **HU-50 (SCRUM-62): Publicacion y retiro manual de contenido del feed**.
 Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05, RF-06, RF-07, RF-11, RF-12, RF-22, RF-36, RF-42, RF-74, RNF-01 a RNF-12, RNF-18, RNF-27, RNF-40. Caso de uso CU-01, pasos 1 a 6, flujo alternativo A, excepcion E2. CU-02 paso 7.
@@ -219,9 +219,15 @@ El prompt describía el bug como reintentos sin límite en "la cola de reintento
 
 Historia de verificación transversal (300 sesiones concurrentes, 3.000 usuarios, feed/foro/mapa con
 disponibilidad ≥99%, etc.) que en su mayoría depende de subsistemas que todavía no existen en este backend
-(feed, foro, mapa, notificaciones, capa HTTP). Solo se implementan los dos criterios verificables contra lo
-que sí existe hoy — el pipeline de ingesta:
+(mapa, notificaciones push, capa HTTP con carga concurrente real). Se implementan los criterios verificables
+contra lo que sí existe hoy — el pipeline de ingesta, el feed segmentado y el foro:
 
+- **Criterio 2 — "con 20.000 documentos, el feed y el foro conservan los tiempos apoyados en índices sobre
+  programa, tema y fecha"**: cubierto contra **MongoDB real, no mocks**, ejercitando el camino de producción
+  real (`MongoConvocatoriaRepository` + `GetSegmentedFeed` + `MongoProgramTargetingRepository` para el feed,
+  `MongoPostRepository` para el foro). Este criterio expuso un problema real de N+1 en `GetSegmentedFeed` (no
+  solo falta de índice) que se corrigió — detalle completo, con números de antes/después, en el
+  [README de `feed`](../feed/README.md#hu-55-scrum-67--criterio-2-rendimiento-del-feed-y-del-foro-con-20000-documentos).
 - **Criterio 3 (parcial) — "se ingiere, normaliza y clasifica en menos de 5 minutos"**: la
   *clasificación* (HU-06 en adelante) no existe todavía, así que se mide lo que sí existe del pipeline:
   ingesta + idempotencia (HU-01) + normalización (HU-02) + deduplicación (HU-03) + cuarentena (HU-04) +
@@ -233,14 +239,36 @@ que sí existe hoy — el pipeline de ingesta:
   buzón**: no existe ninguna capa que sirva contenido (sin feed, sin HTTP), así que el proxy verificable es
   que una caída del buzón durante un ciclo no borre ni corrompa lo consolidado en ejecuciones anteriores —
   exactamente lo que una futura capa de feed tendría que leer.
-- **Diferidos** (criterios 1, 2, 5, 6, 7): requieren feed, foro, mapa, notificaciones y una capa HTTP con
-  carga real de 300 sesiones concurrentes — ninguno existe todavía en este backend.
+- **Criterio 6 — "ante cualquier interrupción del proceso, no se pierde un mensaje del buzón ni una
+  publicación enviada por un estudiante"**: dos escenarios, distintos del criterio 4 (que cubre el buzón
+  caído *antes* de empezar el ciclo):
+  - **Interrupción a mitad de un ciclo de ingesta** (no antes de leerlo): dos pruebas nuevas en
+    `tests/application/IngestInstitutionalMessages.midCycleInterruption.test.ts` demuestran que el cursor
+    (RF-02, criterio 5) conserva el último mensaje confirmado y que la idempotencia por `Message-ID` (HU-01)
+    evita duplicar lo ya consolidado incluso si la propia persistencia del cursor se interrumpe (el
+    escenario más duro: el buzón reentrega mensajes ya consolidados y el reintento los descarta como
+    duplicados). No hizo falta código nuevo: son garantías que HU-01 ya daba, solo no estaban demostradas
+    con este enfoque explícito.
+  - **Una publicación del foro no se pierde**: `CreatePost.execute` termina con `await posts.save(post)`, y
+    `MongoPostRepository.save` usa `insertOne` (escritura reconocida por defecto) — para cuando `save`
+    retorna, la publicación ya es tan durable como el propio MongoDB. Prueba nueva en
+    `tests/forum/CreatePost.resilience.test.ts`: guarda una publicación, descarta la instancia (cliente,
+    repositorio, caso de uso) que la escribió — simulando que el proceso cae justo después de la
+    confirmación de Mongo — y la busca de nuevo con una conexión y un repositorio completamente nuevos. No
+    se encontró ningún caso real de pérdida (sin `insertMany` sin `ordered`, sin escritura
+    fire-and-forget), así que tampoco hizo falta código nuevo aquí: la prueba demuestra la garantía
+    existente.
+- **Diferidos** (criterios 1, 5, 7): requieren una capa HTTP con carga real de 300 sesiones concurrentes
+  (criterio 1), medición de disponibilidad en producción (criterio 5) e indicadores de progreso de UI
+  (criterio 7) — ninguno existe todavía en este backend.
 
 | Criterio | Estado | Prueba |
 |---|---|---|
+| 2 — 20k documentos, feed y foro apoyados en índices | Cubierto | `tests/performance/FeedAndForumThroughput.test.ts` (contra MongoDB real; detalle en README de `feed`) |
 | 3 (parcial: sin el paso de clasificación) | Cubierto | `tests/performance/IngestionThroughput.test.ts` (contra MongoDB real) |
 | 4 (parcial: proxy de persistencia, no de una capa de feed) | Cubierto | `IngestInstitutionalMessages.resilience.test.ts` |
-| 1, 2, 5, 6, 7 | Diferidos | Requieren feed/foro/mapa/notificaciones/HTTP |
+| 6 — ninguna interrupción pierde un mensaje del buzón ni una publicación del foro | Cubierto | `tests/application/IngestInstitutionalMessages.midCycleInterruption.test.ts`, `tests/forum/CreatePost.resilience.test.ts` |
+| 1, 5, 7 | Diferidos | Requieren capa HTTP con carga concurrente real, medición de disponibilidad en producción e indicadores de progreso de UI |
 
 ## HU-15 — Vista de detalle de la convocatoria (RF-22, RF-42, CU-02 paso 7) — **parcial**
 

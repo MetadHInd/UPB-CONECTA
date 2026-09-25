@@ -11,4 +11,13 @@ export class InMemoryProgramTargetingRepository implements ProgramTargetingRepos
     const entry = this.entries.get(messageId);
     return entry ? { ...entry, targeting: structuredClone(entry.targeting) } : null;
   }
+
+  async findByMessageIds(messageIds: readonly string[]): Promise<ReadonlyMap<string, ProgramTargetingRecord>> {
+    const result = new Map<string, ProgramTargetingRecord>();
+    for (const messageId of messageIds) {
+      const entry = this.entries.get(messageId);
+      if (entry) result.set(messageId, { ...entry, targeting: structuredClone(entry.targeting) });
+    }
+    return result;
+  }
 }
