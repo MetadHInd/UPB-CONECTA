@@ -86,6 +86,12 @@ export class MongoConsolidatedMessageRegistry implements ConsolidatedMessageRegi
     return found ? toRecord(found) : null;
   }
 
+  /** Usa `idx_representative_message`, ya creado por `ensureIndexes`. */
+  async findByRepresentativeMessageId(messageId: string): Promise<ConsolidatedMessageRecord | null> {
+    const found = await this.collection.findOne({ representativeMessageId: messageId });
+    return found ? toRecord(found) : null;
+  }
+
   async save(record: ConsolidatedMessageRecord): Promise<void> {
     const _id = convocatoriaIdToString(record);
     await this.collection.updateOne(

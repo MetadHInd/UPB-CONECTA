@@ -461,10 +461,13 @@ Historia HU-54. Resumen de lo realizado y decisiones tomadas:
 
 Los criterios relativos al "servicio de clasificación" y al "servicio de
 moderación" (criterios 4 y 5 en la HU-54) asumen que existen contextos,
-puertos y adaptadores para `classification` y `moderation`. En este repo esos
-contextos **no existen**; por tanto **no se han implementado ni probado**.
-Cuando se creen los contextos `classification` y `moderation`, se seguirán
-las mismas pautas de diseño (puertos y dobles en memoria) para añadir pruebas
-que simulen indisponibilidad y verifiquen las colas de reintento/retención.
+puertos y adaptadores para `classification` y `moderation`. `classification`
+existe desde HU-06. **Actualización:** un contexto `moderation` también
+existe desde HU-49, pero es el panel administrativo de revisión de cuarentena
+y documentos pendientes — no el "servicio de moderación" (automático, sobre
+contenido del foro) al que esta nota original se refería. Ese servicio
+automático sigue sin existir; si se construye, las mismas pautas de diseño
+de esta historia (puertos y dobles en memoria, pruebas de indisponibilidad y
+colas de reintento/retención) siguen aplicando.
 
 Trazabilidad para HU-54: RNF-43, RNF-44, RNF-10, RNF-11, RNF-12. Entregable 1 del Project Charter

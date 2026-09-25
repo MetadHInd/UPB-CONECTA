@@ -12,6 +12,10 @@ export class InMemoryQuarantineRepository implements QuarantineRepositoryPort {
     return this.messages.get(mailboxUid) ?? null;
   }
 
+  async findAll(): Promise<readonly QuarantinedMessage[]> {
+    return [...this.messages.values()];
+  }
+
   get size(): number {
     return this.messages.size;
   }
