@@ -27,4 +27,8 @@ export class InMemoryStudentProfileRepository implements StudentProfileRepositor
     );
     return true;
   }
+
+  async findAll(): Promise<readonly StudentProfile[]> {
+    return [...this.profiles.values()];
+  }
 }
