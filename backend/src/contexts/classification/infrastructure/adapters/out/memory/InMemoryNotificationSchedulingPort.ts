@@ -11,8 +11,13 @@ import type { NotificationSchedulingPort } from '../../../../domain/ports/out/No
  */
 export class InMemoryNotificationSchedulingPort implements NotificationSchedulingPort {
   readonly scheduled: ClassificationResultRecord[] = [];
+  readonly cancelled: string[] = [];
 
   async scheduleForPublication(record: ClassificationResultRecord): Promise<void> {
     this.scheduled.push(record);
+  }
+
+  async cancelScheduledNotifications(messageId: string): Promise<void> {
+    this.cancelled.push(messageId);
   }
 }

@@ -18,6 +18,7 @@ function record(overrides: Partial<ConsolidatedMessageRecord> = {}): Consolidate
     resendCount: 0,
     dueDate: { kind: 'sin-vencimiento' },
     applicationLink: null,
+    withdrawnAt: null,
     ...overrides
   };
 }
@@ -125,6 +126,20 @@ describe('MongoConsolidatedMessageRegistry (integración contra MongoDB real)', 
     });
 
     expect(found?.body).toBe(original.body);
+  });
+
+  it('HU-50: guarda y recupera withdrawnAt, y un documento anterior a HU-50 sin el campo se lee como vigente', async () => {
+    const original = record();
+    await registry.save(original);
+    await registry.save({ ...original, withdrawnAt: new Date('2026-09-23T00:00:00Z') });
+
+    const found = await registry.findById({ sender: original.sender, subject: original.subject, firstSentAt: original.firstSentAt });
+    expect(found?.withdrawnAt).toEqual(new Date('2026-09-23T00:00:00Z'));
+
+    // Documento sin el campo `withdrawnAt`, simulando un registro anterior a HU-50.
+    await db.collection(COLLECTION).updateOne({ sender: original.sender, subject: original.subject }, { $unset: { withdrawnAt: '' } });
+    const historic = await registry.findById({ sender: original.sender, subject: original.subject, firstSentAt: original.firstSentAt });
+    expect(historic?.withdrawnAt).toBeNull();
   });
 
   it('findById devuelve null para una identidad que no existe', async () => {

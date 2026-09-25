@@ -43,6 +43,7 @@ function consolidated(overrides: Partial<ConsolidatedMessageRecord> = {}): Conso
     resendCount: 0,
     dueDate: { kind: 'con-fecha', date: new Date('2026-10-01T00:00:00Z') },
     applicationLink: null,
+    withdrawnAt: null,
     ...overrides
   };
 }

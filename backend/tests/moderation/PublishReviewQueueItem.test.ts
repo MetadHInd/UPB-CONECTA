@@ -72,7 +72,8 @@ describe('PublishReviewQueueItem (HU-49, criterio 3)', () => {
       lastSentAt: NOW,
       resendCount: 0,
       dueDate: { kind: 'con-fecha', date: new Date('2026-10-01T00:00:00Z') },
-      applicationLink: null
+      applicationLink: null,
+      withdrawnAt: null
     });
 
     await useCase.execute({ messageId: MESSAGE_ID, subject: 'admin@upb.edu.co' });
@@ -105,7 +106,8 @@ describe('PublishReviewQueueItem (HU-49, criterio 3)', () => {
       lastSentAt: NOW,
       resendCount: 0,
       dueDate: { kind: 'sin-vencimiento' },
-      applicationLink: null
+      applicationLink: null,
+      withdrawnAt: null
     });
     await programTargetingRepo.save({ messageId: MESSAGE_ID, targeting: programTargeting(['sistemas']), persistedAt: NOW });
 
@@ -137,7 +139,8 @@ describe('PublishReviewQueueItem (HU-49, criterio 3)', () => {
       lastSentAt: NOW,
       resendCount: 0,
       dueDate: { kind: 'sin-vencimiento' },
-      applicationLink: null
+      applicationLink: null,
+      withdrawnAt: null
     });
 
     await useCase.execute({ messageId: MESSAGE_ID, subject: 'admin@upb.edu.co' });

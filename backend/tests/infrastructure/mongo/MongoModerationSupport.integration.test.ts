@@ -80,7 +80,8 @@ describe('Soporte Mongo de HU-49 (integración contra MongoDB real)', () => {
       lastSentAt: new Date('2026-09-01T00:00:00Z'),
       resendCount: 0,
       dueDate: { kind: 'sin-vencimiento' },
-      applicationLink: null
+      applicationLink: null,
+      withdrawnAt: null
     });
 
     const found = await registry.findByRepresentativeMessageId('rep-1');

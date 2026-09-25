@@ -17,6 +17,7 @@ interface ConsolidatedMessageDocument {
   resendCount: number;
   dueDate: DueDate;
   applicationLink: string | null;
+  withdrawnAt?: Date | null;
 }
 
 function toRecord(doc: ConsolidatedMessageDocument): ConsolidatedMessageRecord {
@@ -29,7 +30,9 @@ function toRecord(doc: ConsolidatedMessageDocument): ConsolidatedMessageRecord {
     lastSentAt: doc.lastSentAt,
     resendCount: doc.resendCount,
     dueDate: doc.dueDate,
-    applicationLink: doc.applicationLink
+    applicationLink: doc.applicationLink,
+    // HU-50: documentos anteriores a esta historia no tienen el campo — se leen como vigentes.
+    withdrawnAt: doc.withdrawnAt ?? null
   };
 }
 
@@ -55,6 +58,8 @@ export class MongoConsolidatedMessageRegistry implements ConsolidatedMessageRegi
     await db.collection(collectionName).createIndex({ representativeMessageId: 1 }, { name: 'idx_representative_message' });
     await db.collection(collectionName).createIndex({ lastSentAt: -1 }, { name: 'idx_last_sent_at' });
     await db.collection(collectionName).createIndex({ dueDate: 1 }, { name: 'idx_due_date' });
+    // HU-50: acelera la exclusion de retiradas en el feed y su listado administrativo.
+    await db.collection(collectionName).createIndex({ withdrawnAt: 1 }, { name: 'idx_withdrawn_at' });
     // Compound index to accelerate lookups by representativeMessageId ordered by date
     await db
       .collection(collectionName)
@@ -101,7 +106,8 @@ export class MongoConsolidatedMessageRegistry implements ConsolidatedMessageRegi
           lastSentAt: record.lastSentAt,
           resendCount: record.resendCount,
           dueDate: record.dueDate,
-          applicationLink: record.applicationLink
+          applicationLink: record.applicationLink,
+          withdrawnAt: record.withdrawnAt
         }
       },
       { upsert: true }

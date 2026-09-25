@@ -25,6 +25,14 @@ export interface ConsolidatedMessageRecord {
   readonly dueDate: DueDate;
   /** HU-08, criterio 5: enlace de postulacion declarado en el mensaje. */
   readonly applicationLink: string | null;
+  /**
+   * HU-50: momento en que un administrador retiro esta convocatoria del feed,
+   * o `null` si sigue vigente. Vive aqui, no en `classification`, porque es
+   * una decision de negocio sobre la convocatoria (visible o no), distinta
+   * del `publicationStatus` del clasificador (confiable o no) — ver
+   * README de `ingestion`, seccion HU-50.
+   */
+  readonly withdrawnAt: Date | null;
 }
 
 export interface ConsolidatedMessageRegistryPort {

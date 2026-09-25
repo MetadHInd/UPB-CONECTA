@@ -18,6 +18,14 @@ export interface ConvocatoriaDetail {
   readonly applicationLink: string | null;
   /** Criterio 3: dominio de destino a mostrar antes de abrir el enlace externo. */
   readonly applicationDomain: string | null;
+  /**
+   * HU-50, criterio 5: si un administrador retiro esta convocatoria, el
+   * detalle lo informa explicitamente en vez de mostrar contenido roto — no
+   * se oculta el resto de la informacion, el cliente decide como
+   * presentarlo (por ejemplo, un aviso sobre el contenido ya existente).
+   */
+  readonly withdrawn: boolean;
+  readonly withdrawnAt: Date | null;
 }
 
 export interface GetConvocatoriaDetailPort {
