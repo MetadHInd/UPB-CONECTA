@@ -20,7 +20,9 @@ UPB Conecta ataca específicamente ese vacío: agregación, segmentación y opor
 
 ## Estado actual del código
 
-Este proyecto (backend, subcarpeta `backend/` del repositorio) implementa, por ahora, dieciséis historias entre el Sprint 1 y el Sprint 2: **HU-01 (SCRUM-13)** — conexión programada e idempotente al buzón institucional recolector, el primer eslabón del pipeline de ingesta (EP-01), base de todo lo demás: sin ingesta no hay clasificación, sin clasificación no hay feed, sin feed no hay notificaciones — junto con **HU-02** (extracción de metadatos y normalización del cuerpo), **HU-03** (deduplicación por contenido en ventana temporal), **HU-04** (cuarentena de mensajes no procesables y bitácora, criterios 1-4), **HU-05** (resiliencia del buzón), **HU-08** (extracción de fecha de cierre y enlace de postulación), **HU-15** (vista de detalle de la convocatoria, criterios 1-4), **HU-16** (marcado de estado personal, criterios 1/2/3/5), **HU-18** (registro y ciclo de vida de dispositivos, criterios 1-5), **HU-19** (aviso anticipado al vencimiento según la preferencia del estudiante), **HU-20** (aviso de nueva convocatoria pertinente al programa del estudiante), **HU-21** (agrupación de avisos y límite diario, criterios 1/2/3/6), **HU-38** (preferencias de notificación, criterios 1/2/3/5/6), **HU-44** (consentimiento informado), **HU-53** (verificación automatizada de la arquitectura) y **HU-55** (rendimiento y resiliencia, criterios 3-4 parciales).
+Este proyecto (backend, subcarpeta `backend/` del repositorio) implementa, por ahora, diecisiete historias entre el Sprint 1 y el Sprint 2: **HU-01 (SCRUM-13)** — conexión programada e idempotente al buzón institucional recolector, el primer eslabón del pipeline de ingesta (EP-01), base de todo lo demás: sin ingesta no hay clasificación, sin clasificación no hay feed, sin feed no hay notificaciones — junto con **HU-02** (extracción de metadatos y normalización del cuerpo), **HU-03** (deduplicación por contenido en ventana temporal), **HU-04** (cuarentena de mensajes no procesables y bitácora, criterios 1-4), **HU-05** (resiliencia del buzón), **HU-08** (extracción de fecha de cierre y enlace de postulación), **HU-15** (vista de detalle de la convocatoria, criterios 1-4), **HU-16** (marcado de estado personal, criterios 1/2/3/5), **HU-18** (registro y ciclo de vida de dispositivos, criterios 1-5), **HU-19** (aviso anticipado al vencimiento según la preferencia del estudiante), **HU-20** (aviso de nueva convocatoria pertinente al programa del estudiante), **HU-21** (agrupación de avisos y límite diario, criterios 1/2/3/6), **HU-38** (preferencias de notificación, criterios 1/2/3/5/6), **HU-44** (consentimiento informado), **HU-51** (tablero de métricas de operación y calidad del clasificador, criterios 1-6), **HU-53** (verificación automatizada de la arquitectura) y **HU-55** (rendimiento y resiliencia, criterios 3-4 parciales).
+
+> Nota: esta sección no lista todavía cada historia implementada en el repositorio (por ejemplo HU-06 a HU-12, HU-30, HU-37, HU-43, HU-45-HU-47, HU-49-HU-50, ya en `main` — ver el listado completo y actualizado en el [README raíz](../README.md#estado-actual)); se mantiene aquí en su redacción original de Sprint 1-2 y solo se le agregaron estas historias.
 
 El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificación de Requerimientos y el Product Backlog del proyecto) vive en Jira. Los sprints activos agrupan, además de estas catorce, las historias que comparten su mismo riesgo técnico — ingesta, deduplicación, clasificación temprana y arquitectura verificable:
 
@@ -40,13 +42,14 @@ El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificació
 | HU-21 *(implementada aquí, criterios 1/2/3/6)* | Agrupación de avisos, límite diario y apertura directa al detalle |
 | HU-38 *(implementada aquí, criterios 1/2/3/5/6)* | Preferencias de notificación por categoría, anticipación y tema visual |
 | HU-44 *(implementada aquí)* | Consentimiento informado de tratamiento de datos con registro versionado |
+| HU-51 *(implementada aquí, criterios 1-6)* | Tablero de métricas de operación y calidad del clasificador |
 | HU-53 *(implementada aquí)* | Aislamiento del dominio verificable y sustituibilidad de los adaptadores |
 | HU-54 | Cobertura de pruebas bajo TDD y dobles para escenarios de falla externa |
 | HU-55 *(implementada aquí, criterios 3-4)* | Rendimiento bajo carga (parcial) y degradación controlada ante fallos |
 | T-01 | Desbloqueo de las dependencias institucionales externas (buzón y directorio) |
 | T-02 | Modelo de datos documental, repositorios e índices base |
 
-`src/contexts/consent/`, `src/contexts/notifications/` y `src/contexts/personalization/` son los contextos fuera de `ingestion` — mismo patrón hexagonal, ver el README propio de cada uno. A medida que se implementen más historias, se añadirán más carpetas bajo `src/contexts/` (por ejemplo `classification`, `feed`, `moderation`).
+`src/contexts/consent/`, `src/contexts/notifications/`, `src/contexts/personalization/` y `src/contexts/metrics/` (HU-51, tablero de métricas de operación) son algunos de los contextos fuera de `ingestion` — mismo patrón hexagonal, ver el README propio de cada uno; el árbol completo de contextos hoy incluye además `classification`, `identity`, `consent`, `forum`, `targeting`, `hardening`, `moderation`, `feed` y `profile`, cada uno con su propio README.
 
 ## Arquitectura
 
@@ -114,7 +117,8 @@ cp .env.example .env
 npm install
 npm run typecheck            # TypeScript estricto
 npm run check:architecture   # RNF-41: el dominio no puede importar infraestructura
-npm test                     # 202 pruebas (requiere MongoDB corriendo)
+npm run check:authorization  # HU-46: toda operacion administrativa declara su rol requerido
+npm test                     # 702 pruebas (requiere MongoDB corriendo)
 npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 npm run build                # compila a dist/
 ```

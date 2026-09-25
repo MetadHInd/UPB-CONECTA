@@ -6,6 +6,7 @@
     { "operation": "WithdrawConvocatoria", "requiredRole": "content-admin" },
     { "operation": "GetReviewQueue", "requiredRole": "content-admin" },
     { "operation": "PublishReviewQueueItem", "requiredRole": "content-admin" },
-    { "operation": "DiscardReviewQueueItem", "requiredRole": "content-admin" }
+    { "operation": "DiscardReviewQueueItem", "requiredRole": "content-admin" },
+    { "operation": "GetOperationsDashboard", "requiredRole": "content-admin" }
   ]
 }
