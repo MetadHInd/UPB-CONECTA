@@ -1,8 +1,11 @@
 import type { ConsentRecord } from '../entities/ConsentRecord.js';
 
+/** Extraido como tipo con nombre para que `RequireConsentToProceed` (criterio 3) lo reutilice sin duplicar el literal. */
+export type ConsentRequirementReason = 'nunca-acepto' | 'version-desactualizada';
+
 export type ConsentStatus =
   | { readonly kind: 'vigente'; readonly record: ConsentRecord }
-  | { readonly kind: 'requiere-consentimiento'; readonly reason: 'nunca-acepto' | 'version-desactualizada' };
+  | { readonly kind: 'requiere-consentimiento'; readonly reason: ConsentRequirementReason };
 
 /**
  * HU-44, criterios 1, 3 y 5: decide si el estudiante puede continuar o debe

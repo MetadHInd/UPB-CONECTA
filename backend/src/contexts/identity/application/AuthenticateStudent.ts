@@ -1,6 +1,7 @@
 import type { IdentityCredentials, IdentityProfile, IdentityProviderPort } from '../domain/ports/out/IdentityProviderPort.js';
 import type { AuthenticatedProfileSyncPort } from '../domain/ports/out/AuthenticatedProfileSyncPort.js';
 import type { RateLimiterPort } from '../domain/ports/out/RateLimiterPort.js';
+import type { ConsentStatusPort } from '../domain/ports/out/ConsentStatusPort.js';
 import { AuthenticationFailureKind, type AuthenticationResult } from '../domain/entities/AuthenticationResult.js';
 import type { SessionTokenIssuer } from './SessionTokenIssuer.js';
 
@@ -27,6 +28,7 @@ export class AuthenticateStudent {
       readonly rateLimiter: RateLimiterPort;
       readonly sessions: SessionTokenIssuer;
       readonly profileSync: AuthenticatedProfileSyncPort;
+      readonly consentStatus: ConsentStatusPort;
     }
   ) {}
 
@@ -70,11 +72,18 @@ export class AuthenticateStudent {
     // HU-45: el sujeto del token es el correo institucional, que el proveedor
     // siempre devuelve (a diferencia de `studentId`, que es opcional).
     const session = await this.dependencies.sessions.startSession(profile.email);
+    // HU-44, criterio 1: mismo identificador que el sujeto de la sesion, para
+    // que el consentimiento registrado y la sesion abierta se refieran al
+    // mismo estudiante sin depender de `studentId` (opcional). Se evalua
+    // fresco en cada login, nunca cacheado — mismo principio que HU-46 aplica
+    // al rol de la cuenta.
+    const consent = await this.dependencies.consentStatus.getRequirement(profile.email);
     return {
       ok: true,
       profile,
       message: 'Autenticación correcta.',
-      session
+      session,
+      consent
     };
   }
 }

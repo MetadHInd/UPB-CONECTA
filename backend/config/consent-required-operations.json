@@ -1,0 +1,7 @@
+{
+  "operations": [
+    { "operation": "ViewStudentProfile", "documentTypes": ["privacy-policy"] },
+    { "operation": "UpdateStudentProfile", "documentTypes": ["privacy-policy"] },
+    { "operation": "CreatePost", "documentTypes": ["privacy-policy", "forum-guidelines"] }
+  ]
+}

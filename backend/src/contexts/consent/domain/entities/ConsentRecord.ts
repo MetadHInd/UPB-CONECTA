@@ -9,6 +9,15 @@
  */
 export type ConsentDocumentType = 'privacy-policy' | 'forum-guidelines';
 
+/**
+ * HU-44, criterios 1 y 3: todos los documentos que exige el primer ingreso.
+ * El texto de la historia es explicito ("la politica de tratamiento de datos
+ * y las normas de convivencia del foro"), asi que el punto de enganche de
+ * login (`ConsentStatusPort` en `identity`) recorre esta lista completa, no
+ * solo `privacy-policy`.
+ */
+export const CONSENT_DOCUMENT_TYPES: readonly ConsentDocumentType[] = ['privacy-policy', 'forum-guidelines'];
+
 export interface ConsentRecord {
   readonly studentId: string;
   readonly documentType: ConsentDocumentType;

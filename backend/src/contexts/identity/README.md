@@ -2,7 +2,7 @@
 
 ## Propósito
 
-Este contexto atiende la HU-43 (autenticación de estudiantes contra el directorio institucional), la HU-45 (expiración de sesión y rotación de refresh token) y la HU-46 (control de acceso por rol verificado en servidor). Ver las secciones [HU-45](#hu-45--expiración-de-sesión-y-rotación-de-refresh-token) y [HU-46](#hu-46--control-de-acceso-por-rol-verificado-en-servidor-rf-76-rnf-14-rnf-18).
+Este contexto atiende la HU-43 (autenticación de estudiantes contra el directorio institucional), la HU-45 (expiración de sesión y rotación de refresh token), la HU-46 (control de acceso por rol verificado en servidor) y el punto de enganche de criterio 1 de HU-44 (presentar la política de tratamiento de datos en el primer ingreso). Ver las secciones [HU-45](#hu-45--expiración-de-sesión-y-rotación-de-refresh-token), [HU-46](#hu-46--control-de-acceso-por-rol-verificado-en-servidor-rf-76-rnf-14-rnf-18) y [HU-44](#hu-44--consentimiento-informado-criterio-1-en-el-login).
 
 La política del backend es explícita:
 
@@ -16,6 +16,20 @@ La política del backend es explícita:
 
 `AuthenticateStudent` recibe una dependencia obligatoria `profileSync: AuthenticatedProfileSyncPort`. Tras cada autenticación correcta, y antes de emitir la sesión, envía los datos frescos del directorio al contexto `profile`, que implementa el puerto. `identity` no importa nada de `profile`. Si la sincronización falla, el login falla. Detalle en `src/contexts/profile/README.md`.
 
+## HU-44 — consentimiento informado (criterio 1 en el login)
+
+Trazabilidad: RF-71, RNF-23, Ley Estatutaria 1581 de 2012. Detalle completo del contexto que implementa el consentimiento (registro versionado, vigencia, bloqueo) en `src/contexts/consent/README.md`; aquí solo el punto de enganche con el login.
+
+El criterio 1 de HU-44 exige que "el sistema presente la política de tratamiento de datos personales antes de permitir el uso de la aplicación" en el primer ingreso. El README de `consent` declaraba este criterio diferido porque "requiere HU-43 y un punto de entrada HTTP" — ya no es cierto: HU-43 está aquí, y **no hay servidor HTTP en este repositorio, y eso no bloquea la historia**, mismo patrón que HU-45 y HU-46 en este mismo README.
+
+`AuthenticateStudent` gana una dependencia obligatoria más, `consentStatus: ConsentStatusPort`, con el mismo rol que `profileSync` (HU-37): se invoca tras autenticar con éxito, y su resultado se agrega al caso `ok: true` de `AuthenticationResult` como `consent: ConsentRequirementResult` (`{ mustConsent, pending }`) — igual a como ya expone `session`. La futura capa HTTP usa ese campo para decidir si muestra el modal de política antes de dejar continuar, sin que `identity` sepa nada de cómo `consent` decide vigencia.
+
+**Desacople**: `ConsentStatusPort` (`domain/ports/out/ConsentStatusPort.ts`) lo declara `identity` con tipos propios (`documentType: string`, no el `ConsentDocumentType` de `consent`) — `identity` no importa nada del dominio de `consent`. Lo implementa `ConsentStatusAdapter` (`infrastructure/adapters/out/consent-status/`), que sí vive en la infraestructura de `identity` y ahí sí puede llamar a `RequireConsentToProceed` de `consent` (aplicación) — mismo patrón de desacople que `IdentityProfileSyncAdapter` (`profile/infrastructure`) en sentido inverso: el puerto lo declara quien lo necesita, la implementación cruza el límite de contexto solo en infraestructura. `npm run check:architecture` no impone esta regla entre contextos (solo domain→infra y application→infra dentro de un mismo contexto); es una convención deliberada, documentada aquí y en `consent/README.md`.
+
+`ConsentStatusAdapter` consulta los dos documentos del primer ingreso (`CONSENT_DOCUMENT_TYPES` de `consent`: política de datos y normas del foro, tal como pide el texto de la historia) en cada login, sin cachear — mismo principio que HU-46 aplica al rol de la cuenta ("nunca se cachea, se lee fresco en cada llamada"). Si el puerto de consentimiento falla, el login falla (no se abre sesión sin poder determinar el estado del consentimiento) — mismo criterio de "fail-safe, no fail-open" que ya aplica `profileSync`.
+
+Pruebas: `ConsentAtLogin.test.ts` (flujo completo con la implementación real de `consent`, incluyendo el caso donde el puerto falla) y `ConsentStatusAdapter.test.ts` (el adaptador en aislamiento). El mecanismo de bloqueo real (criterio 3, "no se permite usar funciones que tratan datos personales") vive enteramente en `consent` — ver su README.
+
 ## Varios destinos de sincronización (HU-30)
 
 Desde HU-30, el foro también necesita los datos del directorio en cada login. `FanOutProfileSync` (`infrastructure/adapters/out/profile-sync/`) implementa `AuthenticatedProfileSyncPort` invocando en orden a varios destinos (`profile` y `forum`). Si uno falla, el login falla. Detalle en `src/contexts/forum/README.md`.
@@ -27,6 +41,7 @@ Desde HU-30, el foro también necesita los datos del directorio en cada login. `
 - `IdentityProviderPort`: contrato del proveedor de autenticación.
 - `RateLimiterPort`: contrato para controlar intentos fallidos repetidos.
 - `AuthenticationResult`: resultado de la autenticación con estados `ok: true` o `ok: false`.
+- `ConsentStatusPort` (HU-44): si el estudiante debe (re)aceptar algún documento de consentimiento antes de usar la aplicación.
 
 ### Aplicación
 
@@ -37,6 +52,7 @@ Desde HU-30, el foro también necesita los datos del directorio en cada login. `
 - `InMemoryIdentityProviderAdapter`: adaptación local para pruebas y entorno sin proveedor externo real.
 - `RealIdentityProviderAdapter`: adaptador que falla explícitamente hasta que exista configuración real del directorio institucional.
 - `InMemoryRateLimiter`: limitador en memoria con ventana configurable por variables de entorno.
+- `ConsentStatusAdapter` (HU-44): implementa `ConsentStatusPort` llamando a `RequireConsentToProceed` del contexto `consent`.
 
 ## Variables de entorno soportadas
 

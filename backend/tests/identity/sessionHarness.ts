@@ -4,6 +4,7 @@ import { RefreshSession } from '../../src/contexts/identity/application/RefreshS
 import { SessionTokenIssuer } from '../../src/contexts/identity/application/SessionTokenIssuer.js';
 import { VerifyAccessToken } from '../../src/contexts/identity/application/VerifyAccessToken.js';
 import type { AuthenticatedProfileSyncPort } from '../../src/contexts/identity/domain/ports/out/AuthenticatedProfileSyncPort.js';
+import type { ConsentStatusPort } from '../../src/contexts/identity/domain/ports/out/ConsentStatusPort.js';
 import type { RefreshTokenRepositoryPort } from '../../src/contexts/identity/domain/ports/out/RefreshTokenRepositoryPort.js';
 import { SessionPolicy } from '../../src/contexts/identity/domain/value-objects/SessionPolicy.js';
 import { RandomSessionIdGenerator } from '../../src/contexts/identity/infrastructure/adapters/out/crypto/RandomSessionIdGenerator.js';
@@ -21,6 +22,11 @@ export const STUDENT = { username: 'estudiante@upb.edu.co', password: 'S3cr3t!UP
 /** Sincronización de perfil que no hace nada: las pruebas de sesión no la observan. */
 export const ignoreProfileSync: AuthenticatedProfileSyncPort = { syncFromDirectory: async () => undefined };
 
+/** Consentimiento siempre vigente: las pruebas de sesión (HU-43/45/46) no observan HU-44. */
+export const ignoreConsentStatus: ConsentStatusPort = {
+  getRequirement: async () => ({ mustConsent: false, pending: [] })
+};
+
 /**
  * Cablea el flujo completo de sesion con el adaptador JWT real (firma real,
  * no un doble) y un reloj manual para mover el tiempo en las pruebas.
@@ -31,6 +37,7 @@ export function buildSessionHarness(
     readonly refreshTokens?: RefreshTokenRepositoryPort;
     readonly start?: Date;
     readonly profileSync?: AuthenticatedProfileSyncPort;
+    readonly consentStatus?: ConsentStatusPort;
   } = {}
 ) {
   const config = readSessionConfig({ SESSION_SIGNING_SECRET: TEST_SIGNING_SECRET, ...options.env });
@@ -55,7 +62,8 @@ export function buildSessionHarness(
       provider,
       rateLimiter: new InMemoryRateLimiter(),
       sessions,
-      profileSync: options.profileSync ?? ignoreProfileSync
+      profileSync: options.profileSync ?? ignoreProfileSync,
+      consentStatus: options.consentStatus ?? ignoreConsentStatus
     }),
     refresh: new RefreshSession({ signer, refreshTokens, audit, clock, sessions }),
     verifyAccess: new VerifyAccessToken({ signer, refreshTokens, audit, clock }),

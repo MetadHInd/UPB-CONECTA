@@ -5,12 +5,12 @@ import { InMemoryIdentityProviderAdapter } from '../../src/contexts/identity/inf
 import { InMemoryRateLimiter } from '../../src/contexts/identity/infrastructure/adapters/out/memory/InMemoryRateLimiter.js';
 import { readIdentityRateLimitConfig } from '../../src/contexts/identity/infrastructure/config/IdentityRateLimitConfig.js';
 import { AuthenticationError, AuthenticationFailureKind } from '../../src/contexts/identity/domain/entities/AuthenticationResult.js';
-import { buildSessionHarness, ignoreProfileSync } from './sessionHarness.js';
+import { buildSessionHarness, ignoreConsentStatus, ignoreProfileSync } from './sessionHarness.js';
 
 describe('HU-43 — autenticación institucional', () => {
   it('valida credenciales contra el directorio institucional y devuelve los datos del perfil', async () => {
     const provider = new InMemoryIdentityProviderAdapter();
-    const useCase = new AuthenticateStudent({ provider, rateLimiter: new InMemoryRateLimiter(), sessions: buildSessionHarness().sessions, profileSync: ignoreProfileSync });
+    const useCase = new AuthenticateStudent({ provider, rateLimiter: new InMemoryRateLimiter(), sessions: buildSessionHarness().sessions, profileSync: ignoreProfileSync, consentStatus: ignoreConsentStatus });
 
     const result = await useCase.execute({
       username: 'estudiante@upb.edu.co',
@@ -28,7 +28,7 @@ describe('HU-43 — autenticación institucional', () => {
 
   it('no almacena la contraseña ni la expone en ningún resultado serializado', async () => {
     const provider = new InMemoryIdentityProviderAdapter();
-    const useCase = new AuthenticateStudent({ provider, rateLimiter: new InMemoryRateLimiter(), sessions: buildSessionHarness().sessions, profileSync: ignoreProfileSync });
+    const useCase = new AuthenticateStudent({ provider, rateLimiter: new InMemoryRateLimiter(), sessions: buildSessionHarness().sessions, profileSync: ignoreProfileSync, consentStatus: ignoreConsentStatus });
 
     const result = await useCase.execute({
       username: 'estudiante@upb.edu.co',
@@ -43,7 +43,7 @@ describe('HU-43 — autenticación institucional', () => {
 
   it('no revela si el usuario existe cuando la credencial es invalida', async () => {
     const provider = new InMemoryIdentityProviderAdapter();
-    const useCase = new AuthenticateStudent({ provider, rateLimiter: new InMemoryRateLimiter(), sessions: buildSessionHarness().sessions, profileSync: ignoreProfileSync });
+    const useCase = new AuthenticateStudent({ provider, rateLimiter: new InMemoryRateLimiter(), sessions: buildSessionHarness().sessions, profileSync: ignoreProfileSync, consentStatus: ignoreConsentStatus });
 
     const result = await useCase.execute({
       username: 'noexiste@upb.edu.co',
@@ -61,7 +61,7 @@ describe('HU-43 — autenticación institucional', () => {
 
   it('informa indisponibilidad del directorio sin exponer detalles técnicos', async () => {
     const provider = new RealIdentityProviderAdapter();
-    const useCase = new AuthenticateStudent({ provider, rateLimiter: new InMemoryRateLimiter(), sessions: buildSessionHarness().sessions, profileSync: ignoreProfileSync });
+    const useCase = new AuthenticateStudent({ provider, rateLimiter: new InMemoryRateLimiter(), sessions: buildSessionHarness().sessions, profileSync: ignoreProfileSync, consentStatus: ignoreConsentStatus });
 
     const result = await useCase.execute({
       username: 'estudiante@upb.edu.co',
@@ -78,7 +78,7 @@ describe('HU-43 — autenticación institucional', () => {
   it('aplica limitación de tasa por cuenta y por origen', async () => {
     const provider = new InMemoryIdentityProviderAdapter();
     const rateLimiter = new InMemoryRateLimiter({ maxAttemptsPerAccount: 2, maxAttemptsPerOrigin: 2, windowMs: 60_000 });
-    const useCase = new AuthenticateStudent({ provider, rateLimiter, sessions: buildSessionHarness().sessions, profileSync: ignoreProfileSync });
+    const useCase = new AuthenticateStudent({ provider, rateLimiter, sessions: buildSessionHarness().sessions, profileSync: ignoreProfileSync, consentStatus: ignoreConsentStatus });
 
     await useCase.execute({ username: 'estudiante@upb.edu.co', password: 'wrong', origin: '10.0.0.1' });
     await useCase.execute({ username: 'estudiante@upb.edu.co', password: 'wrong', origin: '10.0.0.1' });
@@ -96,7 +96,7 @@ describe('HU-43 — autenticación institucional', () => {
 
   it('no registra la contraseña en ninguna llamada de console durante un intento fallido y uno exitoso', async () => {
     const provider = new InMemoryIdentityProviderAdapter();
-    const useCase = new AuthenticateStudent({ provider, rateLimiter: new InMemoryRateLimiter(), sessions: buildSessionHarness().sessions, profileSync: ignoreProfileSync });
+    const useCase = new AuthenticateStudent({ provider, rateLimiter: new InMemoryRateLimiter(), sessions: buildSessionHarness().sessions, profileSync: ignoreProfileSync, consentStatus: ignoreConsentStatus });
     const password = 'S3cr3t!UPB';
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
