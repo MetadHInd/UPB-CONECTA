@@ -36,7 +36,9 @@ export class GetConvocatoriaDetail implements GetConvocatoriaDetailPort {
       dueDate: record.dueDate,
       status: evaluateConvocatoriaStatus(record.dueDate, this.deps.clock.now()),
       applicationLink: record.applicationLink,
-      applicationDomain: record.applicationLink ? extractDomain(record.applicationLink) : null
+      applicationDomain: record.applicationLink ? extractDomain(record.applicationLink) : null,
+      withdrawn: record.withdrawnAt !== null,
+      withdrawnAt: record.withdrawnAt
     };
   }
 }

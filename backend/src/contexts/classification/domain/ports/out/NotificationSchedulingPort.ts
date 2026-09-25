@@ -11,4 +11,13 @@ import type { ClassificationResultRecord } from '../../entities/ClassificationRe
  */
 export interface NotificationSchedulingPort {
   scheduleForPublication(record: ClassificationResultRecord): Promise<void>;
+  /**
+   * HU-50, criterio 4: cuando se retira una convocatoria, sus avisos
+   * programados pendientes se cancelan — sin esto, el futuro planificador
+   * (HU-20) notificaria sobre contenido que ya no existe. Metodo agregado de
+   * forma aditiva: no cambia la firma de `scheduleForPublication`, que ya
+   * usan `ClassifyInstitutionalMessage` (HU-06/HU-10) y `CorrectClassification`
+   * (HU-11).
+   */
+  cancelScheduledNotifications(messageId: string): Promise<void>;
 }

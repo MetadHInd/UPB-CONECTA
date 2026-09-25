@@ -16,6 +16,7 @@ function record(overrides: Partial<ConsolidatedMessageRecord> = {}): Consolidate
     resendCount: 0,
     dueDate: { kind: 'con-fecha', date: new Date('2026-09-30T05:00:00Z') },
     applicationLink: 'https://upb.edu.co/postulacion/501',
+    withdrawnAt: null,
     ...overrides
   };
 }
@@ -105,5 +106,31 @@ describe('GetConvocatoriaDetail (HU-15)', () => {
       convocatoriaId: { sender: 'nadie@upb.edu.co', subject: 'no existe', firstSentAt: new Date('2026-01-01T00:00:00Z') }
     });
     expect(detail).toBeNull();
+  });
+
+  it('HU-50, criterio 5: una convocatoria retirada se informa explicitamente, sin ocultar el resto del contenido', async () => {
+    const withdrawnAt = new Date('2026-09-23T00:00:00Z');
+    const original = record({ withdrawnAt });
+    const { useCase } = buildUseCase([original]);
+
+    const detail = await useCase.execute({
+      convocatoriaId: { sender: original.sender, subject: original.subject, firstSentAt: original.firstSentAt }
+    });
+
+    expect(detail?.withdrawn).toBe(true);
+    expect(detail?.withdrawnAt).toEqual(withdrawnAt);
+    expect(detail?.body).toBe(original.body);
+  });
+
+  it('una convocatoria vigente no esta marcada como retirada', async () => {
+    const original = record();
+    const { useCase } = buildUseCase([original]);
+
+    const detail = await useCase.execute({
+      convocatoriaId: { sender: original.sender, subject: original.subject, firstSentAt: original.firstSentAt }
+    });
+
+    expect(detail?.withdrawn).toBe(false);
+    expect(detail?.withdrawnAt).toBeNull();
   });
 });

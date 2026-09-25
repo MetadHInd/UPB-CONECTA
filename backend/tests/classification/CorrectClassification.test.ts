@@ -31,6 +31,7 @@ function convocatoria(overrides: Partial<ConsolidatedMessageRecord> = {}): Conso
     resendCount: 0,
     dueDate: { kind: 'con-fecha', date: new Date('2026-09-30T05:00:00Z') },
     applicationLink: null,
+    withdrawnAt: null,
     ...overrides
   };
 }

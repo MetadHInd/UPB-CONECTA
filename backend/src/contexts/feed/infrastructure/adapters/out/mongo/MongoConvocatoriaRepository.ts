@@ -14,6 +14,7 @@ interface ConsolidatedDoc {
   resendCount: number;
   dueDate: unknown;
   applicationLink: string | null;
+  withdrawnAt?: Date | null;
 }
 
 export class MongoConvocatoriaRepository implements ConvocatoriaRepositoryPort {
@@ -41,6 +42,7 @@ function toRecord(d: ConsolidatedDoc): ConsolidatedMessageRecord {
     lastSentAt: d.lastSentAt,
     resendCount: d.resendCount,
     dueDate: d.dueDate as any,
-    applicationLink: d.applicationLink
+    applicationLink: d.applicationLink,
+    withdrawnAt: d.withdrawnAt ?? null
   };
 }

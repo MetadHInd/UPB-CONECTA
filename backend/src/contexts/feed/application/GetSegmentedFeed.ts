@@ -41,6 +41,12 @@ export class GetSegmentedFeed {
 
     const visible: typeof entries = [];
     for (const entry of entries) {
+      // HU-50, criterio 3: una convocatoria retirada deja de ser visible en la siguiente sincronizacion.
+      // Chequeo truthy (no `!== null`): fixtures de pruebas previas a HU-50
+      // construyen `record` parcial sin declarar `withdrawnAt` (queda
+      // `undefined`), y un historico sin este campo nunca fue retirado.
+      if (entry.record.withdrawnAt) continue;
+
       const repMessageId = entry.record.representativeMessageId;
       if (!repMessageId) continue; // cannot resolve targeting without messageId
 
