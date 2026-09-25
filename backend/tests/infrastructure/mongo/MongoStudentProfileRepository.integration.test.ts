@@ -90,6 +90,16 @@ describe('MongoStudentProfileRepository (integración contra MongoDB real)', () 
     expect((await narrowed.findByEmail(EMAIL))?.semester).toBeNull();
   });
 
+  it('findAll (HU-19/HU-20): devuelve todos los perfiles guardados, usado por el planificador de avisos de notifications', async () => {
+    await repository.save(StudentProfile.fromDirectory(DIRECTORY_PROFILE, 'sistemas', BOUNDS, T0));
+    await repository.save(StudentProfile.fromDirectory({ ...DIRECTORY_PROFILE, email: 'otro@upb.edu.co' }, 'industrial', BOUNDS, T0));
+
+    const all = await repository.findAll();
+
+    expect(all.map((p) => p.directory.email).sort()).toEqual([EMAIL, 'otro@upb.edu.co']);
+    expect(all.find((p) => p.directory.email === EMAIL)?.directory.programId).toBe('sistemas');
+  });
+
   it('flujo completo sobre Mongo: login, edición de semestre, re-login y feed recalculado', async () => {
     const harness = buildProfileHarness({ profiles: repository });
     await harness.login();
