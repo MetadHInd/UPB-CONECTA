@@ -88,6 +88,10 @@ El documento de `student_profiles` contiene exactamente `_id` (correo), `program
 
 - `student_profiles`: `_id = email` normalizado; `programId` es el id del catálogo o `null`. Sin índices adicionales, porque todas las lecturas son por `_id`.
 
+## Consumo por el planificador de avisos (HU-19/HU-20, contexto `notifications`)
+
+`StudentProfileRepositoryPort` ganó `findAll(): Promise<readonly StudentProfile[]>`, agregado de forma aditiva (no rompe `findByEmail`/`save`): el planificador de avisos de `notifications` necesita poder listar estudiantes para cruzarlos contra el targeting de una convocatoria, algo que `profile` no necesitaba hasta que existió ese consumidor. `notifications` no importa nada de `profile` en su dominio: declara su propio puerto (`StudentDirectoryPort`, con `studentId`/`programId`) y lo implementa `ProfileStudentDirectoryAdapter` en su propia infraestructura, que sí depende de `StudentProfileRepositoryPort` y proyecta cada `StudentProfile` al tipo de `notifications` — mismo patrón de desacople que `ConsentStatusPort`/`ConsentStatusAdapter` (HU-44, `identity` → `consent`). Detalle completo en `src/contexts/notifications/README.md`, sección HU-19.
+
 ## Gaps conocidos (fuera de esta historia)
 
 - **Nada produce todavía un `semesterRange` desde un correo real.** `ProgramTargetingResolver` (HU-07) no extrae semestres del texto, y además ni él ni `ProgramTargetingRepositoryPort.save` están conectados al flujo de ingesta en `src/`: hoy solo las pruebas guardan targeting. El mecanismo de HU-37 funciona de punta a punta en cuanto un registro tenga `semesterRange`, pero extraer el rango del texto ("de 6° semestre en adelante") es trabajo de una historia de clasificación o targeting.

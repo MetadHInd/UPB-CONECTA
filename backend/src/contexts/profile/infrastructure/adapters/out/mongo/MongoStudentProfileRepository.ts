@@ -74,4 +74,18 @@ export class MongoStudentProfileRepository implements StudentProfileRepositoryPo
     );
     return result.modifiedCount === 1;
   }
+
+  async findAll(): Promise<readonly StudentProfile[]> {
+    const docs = await this.collection.find({}).toArray();
+    return docs.map((doc) =>
+      StudentProfile.restore({
+        email: doc._id,
+        programId: doc.programId,
+        semester: doc.semester === null ? null : SemesterNumber.fromDirectory(doc.semester, this.bounds),
+        semesterSource: doc.semesterSource,
+        updatedAt: doc.updatedAt,
+        version: doc.version
+      })
+    );
+  }
 }

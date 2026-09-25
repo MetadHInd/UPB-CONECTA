@@ -19,11 +19,25 @@ import { buildFixtureMessages } from './contexts/ingestion/infrastructure/fixtur
 import { ClassifyInstitutionalMessage } from './contexts/classification/application/ClassifyInstitutionalMessage.js';
 import { InMemoryClassificationAdapter } from './contexts/classification/infrastructure/adapters/out/memory/InMemoryClassificationAdapter.js';
 import { InMemoryAdminAlertPort } from './contexts/classification/infrastructure/adapters/out/memory/InMemoryAdminAlertPort.js';
-import { InMemoryNotificationSchedulingPort } from './contexts/classification/infrastructure/adapters/out/memory/InMemoryNotificationSchedulingPort.js';
 import { MongoClassificationResultRepository } from './contexts/classification/infrastructure/adapters/out/mongo/MongoClassificationResultRepository.js';
 import { MongoClassificationRetryQueue } from './contexts/classification/infrastructure/adapters/out/mongo/MongoClassificationRetryQueue.js';
 import { MongoPostProcessingRuleRepository } from './contexts/classification/infrastructure/adapters/out/mongo/MongoPostProcessingRuleRepository.js';
 import { MongoReviewThresholdConfig } from './contexts/classification/infrastructure/adapters/out/mongo/MongoReviewThresholdConfig.js';
+import { MongoProgramTargetingRepository } from './contexts/targeting/infrastructure/adapters/out/mongo/MongoProgramTargetingRepository.js';
+import { FacultyProgramResolver } from './contexts/targeting/domain/services/FacultyProgramResolver.js';
+import { loadProgramCatalog } from './contexts/targeting/infrastructure/config/JsonProgramCatalogProvider.js';
+import { MongoStudentProfileRepository } from './contexts/profile/infrastructure/adapters/out/mongo/MongoStudentProfileRepository.js';
+import { readProfileConfig } from './contexts/profile/infrastructure/config/ProfileConfig.js';
+import { NotifyProgramTargetedPublication } from './contexts/notifications/application/NotifyProgramTargetedPublication.js';
+import { EmitDueDateReminders } from './contexts/notifications/application/EmitDueDateReminders.js';
+import { NotificationSchedulingAdapter } from './contexts/notifications/infrastructure/adapters/out/notification-scheduling/NotificationSchedulingAdapter.js';
+import { ProfileStudentDirectoryAdapter } from './contexts/notifications/infrastructure/adapters/out/profile/ProfileStudentDirectoryAdapter.js';
+import { MongoDueDateConvocatoriaSource } from './contexts/notifications/infrastructure/adapters/out/mongo/MongoDueDateConvocatoriaSource.js';
+import { MongoEmittedReminderRegistry } from './contexts/notifications/infrastructure/adapters/out/mongo/MongoEmittedReminderRegistry.js';
+import { MongoNotificationPreferencesRepository } from './contexts/notifications/infrastructure/adapters/out/mongo/MongoNotificationPreferencesRepository.js';
+import { readDueDateReminderConfig } from './contexts/notifications/infrastructure/config/DueDateReminderConfig.js';
+import { DueDateReminderScheduler } from './contexts/notifications/infrastructure/scheduler/DueDateReminderScheduler.js';
+import { SystemClock as NotificationsSystemClock } from './contexts/notifications/infrastructure/adapters/out/memory/SystemClock.js';
 
 /**
  * Raiz de composicion: unico lugar del sistema donde el dominio se encuentra
@@ -42,8 +56,10 @@ async function bootstrap(): Promise<void> {
   await MongoIngestionRunLogRepository.ensureIndexes(db);
   await MongoClassificationResultRepository.ensureIndexes(db);
   await MongoPostProcessingRuleRepository.ensureIndexes(db);
+  await MongoEmittedReminderRegistry.ensureIndexes(db);
 
   const clock = new SystemClock();
+  const notificationsClock = new NotificationsSystemClock();
   const registry = new MongoProcessedMessageRegistry(db);
   const consolidatedRegistry = new MongoConsolidatedMessageRegistry(db);
   // ATENCION: al sustituir este adaptador por el cliente IMAP real, revisar
@@ -54,6 +70,29 @@ async function bootstrap(): Promise<void> {
   // que HU-10 quiere evitar. Ver README de `classification`.
   const mailbox = new InMemoryMailboxAdapter(buildFixtureMessages());
 
+  // HU-19/HU-20 (contexto `notifications`): puertos de `targeting` y
+  // `profile` que ambos casos de uso del planificador de avisos necesitan.
+  const programTargetingRepo = new MongoProgramTargetingRepository(db);
+  const programCatalog = await loadProgramCatalog();
+  const facultyResolver = new FacultyProgramResolver(programCatalog);
+  const profileConfig = readProfileConfig();
+  const studentProfileRepo = new MongoStudentProfileRepository(db, profileConfig.semesterBounds);
+  const studentDirectory = new ProfileStudentDirectoryAdapter(studentProfileRepo);
+  const notificationPreferencesRepo = new MongoNotificationPreferencesRepository(db);
+
+  // HU-20: unico suscriptor de "una convocatoria se publico" (ver su propia
+  // documentacion). Implementa el `NotificationSchedulingPort` que
+  // `classification` ya declaraba desde HU-10 en espera de esta historia.
+  const notifyProgramTargetedPublication = new NotifyProgramTargetedPublication({
+    consolidatedRegistry,
+    programTargetingRepo,
+    facultyResolver,
+    studentDirectory,
+    preferencesRepo: notificationPreferencesRepo,
+    clock: notificationsClock
+  });
+  const notificationSchedulingPort = new NotificationSchedulingAdapter(notifyProgramTargetedPublication);
+
   // Clasificacion completa: HU-06 (stub), reglas de HU-09 y umbral de HU-10.
   const classifyMessage = new ClassifyInstitutionalMessage({
     classificationPort: new InMemoryClassificationAdapter(),
@@ -62,7 +101,7 @@ async function bootstrap(): Promise<void> {
     ruleRepository: new MongoPostProcessingRuleRepository(db),
     reviewThresholdConfig: new MongoReviewThresholdConfig(db),
     adminAlertPort: new InMemoryAdminAlertPort(),
-    notificationSchedulingPort: new InMemoryNotificationSchedulingPort(),
+    notificationSchedulingPort,
     clock
   });
 
@@ -92,9 +131,29 @@ async function bootstrap(): Promise<void> {
     console.error('[ingesta] ciclo fallido:', error);
   });
 
+  // HU-19: planificador de avisos de vencimiento. Relee el estado vigente de
+  // cada convocatoria en cada ciclo (ver documentacion de `EmitDueDateReminders`
+  // para el porque), con un intervalo que garantiza el margen de 60 segundos
+  // del criterio 2.
+  const emitDueDateReminders = new EmitDueDateReminders({
+    dueDateSource: new MongoDueDateConvocatoriaSource(db),
+    classificationResultRepo: new MongoClassificationResultRepository(db),
+    programTargetingRepo,
+    facultyResolver,
+    studentDirectory,
+    preferencesRepo: notificationPreferencesRepo,
+    emittedReminders: new MongoEmittedReminderRegistry(db),
+    systemThresholds: readDueDateReminderConfig().systemThresholds,
+    clock: notificationsClock
+  });
+  const dueDateReminderScheduler = new DueDateReminderScheduler(emitDueDateReminders, () => readDueDateReminderConfig(), (error) => {
+    console.error('[avisos-vencimiento] ciclo fallido:', error);
+  });
+
   scheduler.start();
-  process.on('SIGTERM', () => { scheduler.stop(); void client.close(); });
-  process.on('SIGINT', () => { scheduler.stop(); void client.close(); });
+  dueDateReminderScheduler.start();
+  process.on('SIGTERM', () => { scheduler.stop(); dueDateReminderScheduler.stop(); void client.close(); });
+  process.on('SIGINT', () => { scheduler.stop(); dueDateReminderScheduler.stop(); void client.close(); });
 }
 
 bootstrap().catch((error) => {
