@@ -93,4 +93,21 @@ export class MongoProgramTargetingRepository implements ProgramTargetingReposito
     // Registros anteriores a HU-37 no tienen el campo: se leen sin restriccion.
     return found.semesterRange ? { ...record, semesterRange: found.semesterRange } : record;
   }
+
+  /** HU-55, criterio 2: una sola consulta con `$in` sobre `_id` (indexado por defecto) en vez de N `findOne`. */
+  async findByMessageIds(messageIds: readonly string[]): Promise<ReadonlyMap<string, ProgramTargetingRecord>> {
+    const result = new Map<string, ProgramTargetingRecord>();
+    if (messageIds.length === 0) return result;
+
+    const found = await this.collection.find({ _id: { $in: [...messageIds] } }).toArray();
+    for (const doc of found) {
+      const record: ProgramTargetingRecord = {
+        messageId: doc.messageId,
+        targeting: toTargeting(doc),
+        persistedAt: doc.persistedAt
+      };
+      result.set(doc.messageId, doc.semesterRange ? { ...record, semesterRange: doc.semesterRange } : record);
+    }
+    return result;
+  }
 }

@@ -53,6 +53,7 @@ Se expone un puerto de salida `ProgramTargetingRepositoryPort` con:
 
 - `save(record)`
 - `findByMessageId(messageId)`
+- `findByMessageIds(messageIds)` — HU-55, criterio 2: versión en lote, aditiva (no reemplaza `findByMessageId`, que casos de uso puntuales como `CorrectClassification`, `PublishConvocatoria`, `PublishReviewQueueItem`, `EmitDueDateReminders` y `NotifyProgramTargetedPublication` siguen usando). `GetSegmentedFeed` la usa para resolver targeting de toda una página del feed en una sola consulta en vez de una por convocatoria (N+1 real con 20k documentos consolidados). `MongoProgramTargetingRepository` la resuelve con un único `$in` sobre `_id` (= `messageId`, indexado por defecto). Detalle completo del hallazgo y la corrección en el [README de `feed`](../feed/README.md#hu-55-scrum-67--criterio-2-rendimiento-del-feed-y-del-foro-con-20000-documentos).
 
 Implementaciones:
 
