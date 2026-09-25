@@ -1,4 +1,5 @@
 import type { FacultyProgramResolver } from '../../targeting/domain/services/FacultyProgramResolver.js';
+import { neutralizeHtml } from '../../hardening/domain/services/HtmlEncoding.js';
 import { normalizeForumEmail } from '../domain/entities/ForumAuthor.js';
 import {
   ANONYMITY_NOT_ALLOWED_MESSAGE,
@@ -132,8 +133,9 @@ export class CreatePost {
       id: ids.newId(),
       topicId: topic!.id,
       author: { email: author!.email, name: author!.name, programName: author!.programName, programId: author!.programId },
-      title: content.title,
-      text: content.text,
+      // HU-47, criterio 7: neutraliza marcado/scripts embebidos antes de persistir (ver hardening/domain/services/HtmlEncoding.ts).
+      title: neutralizeHtml(content.title),
+      text: neutralizeHtml(content.text),
       publishedAt: now
     };
     await posts.save(post);

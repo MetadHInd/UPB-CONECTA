@@ -121,6 +121,7 @@ Pruebas: `tests/forum/ForumUseCases.test.ts` › criterio 4 › "cambios de prog
 | `targeting` (bug 3) | `ProgramCatalogMatcher` | Traducir el programa del directorio a id del catálogo |
 | `feed` (HU-12) | Regla de pertenencia al targeting | Extraída a `targetingIncludesProgram` y compartida |
 | `classification` (HU-09) | Patrón de repositorio administrable | `TopicRepositoryPort` |
+| `hardening` (HU-47) | `neutralizeHtml` | `CreatePost.execute()` neutraliza `title`/`text` antes de persistir (criterio 7, scripts embebidos) — ver README de `hardening` |
 
 No se duplicó `IdentityProfile`, `StudentProfile` ni `ProgramTargeting`. `ForumAuthor` no es una copia de `IdentityProfile`: es la proyección con propósito del foro, con solo nombre, programa e id de programa.
 
