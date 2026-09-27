@@ -1,5 +1,7 @@
 export enum ConvocatoriaAuditEventKind {
   PUBLISHED = 'published',
+  /** HU-24, criterio 5: edicion de una convocatoria manual ya publicada. */
+  EDITED = 'edited',
   WITHDRAWN = 'withdrawn'
 }
 
@@ -23,6 +25,8 @@ export interface ConvocatoriaAuditEvent {
   readonly messageId: string;
   readonly actor: string;
   readonly occurredAt: Date;
+  /** HU-24: campos que cambiaron en una edicion (`EDITED`); ausente en publicar y retirar. */
+  readonly changedFields?: readonly string[];
 }
 
 export interface ConvocatoriaAuditLogPort {
