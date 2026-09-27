@@ -244,3 +244,37 @@ Conectado a `npm run check:authorization` y al job `build-and-test` de CI, igual
 | 6 | Un cambio de rol surte efecto en la siguiente petición y queda auditado | `tests/identity/ChangeAccountRole.test.ts` (`criterio 6` y `surte efecto en la siguiente peticion...`) |
 | — | Persistencia real del rol de cuenta y de la auditoría | `tests/infrastructure/mongo/MongoAccountRoleAndAuthorizationAudit.integration.test.ts` |
 | — | Dominio desacoplado de infraestructura | `npm run check:architecture` |
+
+## HU-39 — Cierre de sesión con revocación, baja de dispositivo y purga local (RF-64, RF-72, RF-26, RNF-17)
+
+Reutiliza HU-45 (cadena de refresh tokens, `LogoutSession`, `VerifyAccessToken`) y HU-18 (`InvalidateDevice` de `notifications`).
+
+### Diseño
+
+`CloseSession` es un caso de uso de dominio con tres efectos coordinados, no una acción de interfaz. **Orden: primero la purga local, luego la revocación remota con reintento.** La purga es lo único que no depende de la red y lo que protege un dispositivo compartido.
+
+1. `LocalDataPurgePort.purge(LOCAL_CONTENT_KINDS)`: feed, mapa descargado y estado de postulaciones. Si falla, se informa (`localPurged: false`) y la revocación se intenta igual.
+2. `RemoteSessionClosurePort.close(...)`: una llamada al servidor que ejecuta `LogoutSession`: revoca la cadena (access y refresh mueren porque `VerifyAccessToken` y `RefreshSession` consultan la cadena) y, si llega `deviceToken`, invalida el dispositivo vía `DeviceInvalidationPort` (adaptador hacia `notifications`, que exige que el dispositivo sea de la cuenta).
+3. Si el puerto remoto **lanza** (sin red), la solicitud queda en `PendingRevocationQueuePort` y `RetryPendingRevocations` la reintenta al recuperar conexión. Una respuesta del servidor, aunque sea de rechazo (token vencido o inválido), saca la entrada de la cola.
+
+### Decisiones y límites
+
+- El reintento necesita el refresh token (es lo que autentica ante el servidor). La cola debe vivir en almacenamiento seguro del dispositivo y la entrada se elimina al responder el servidor.
+- Si el refresh token vence antes de recuperar conexión, el servidor responde `token-expired`: la sesión ya no renueva, pero el dispositivo **no** se da de baja porque no hay credencial válida que lo autorice. Es el límite conocido del criterio 2 en ese caso.
+- `LogoutSession` es idempotente; si la respuesta se perdió tras aplicarse, el reintento es inocuo.
+- La cuenta del dispositivo se compara con el `subject` del token (correo institucional); `RegisterDevice` debe registrar con ese mismo identificador.
+
+### Trazabilidad (`tests/identity/CloseSession.test.ts`)
+
+| Criterio | Prueba |
+|---|---|
+| 1 y 4. Access token revocado en servidor y rechazado después | `criterios 1 y 4: ...` |
+| 2. Dispositivo invalidado | `criterio 2: ...` (propio, ajeno, desconocido, ya invalidado) |
+| 3. Purga local | `criterio 3: ...` |
+| 5. Falla de red: purga igual y reintento | bloque `criterio 5` |
+| 6. Refresh token invalidado | `criterio 6: ...` |
+
+### Diferido
+
+- **Cliente Android (Room):** `Frontend/` solo usa datos simulados (`MockData.kt`) y no tiene base local ni cliente HTTP; no hay nada que purgar. Se implementó el puerto (`LocalDataPurgePort`) y dobles en memoria; el adaptador Room, la cola persistente y el disparo del reintento al recuperar conexión quedan para la historia del cliente (criterio 3 del lado móvil).
+- **Capa HTTP:** `RemoteSessionClosurePort` se prueba con `InProcessRemoteSessionClosure`; el cliente real llamará a `POST /session/logout`.

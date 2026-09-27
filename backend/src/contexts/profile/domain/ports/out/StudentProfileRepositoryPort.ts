@@ -21,4 +21,10 @@ export interface StudentProfileRepositoryPort {
    * `ProfileStudentDirectoryAdapter` en `notifications`.
    */
   findAll(): Promise<readonly StudentProfile[]>;
+
+  /**
+   * HU-48 (supresion): borra el perfil del estudiante. `email` ya normalizado.
+   * Devuelve `true` si existia. Idempotente: repetirlo devuelve `false`.
+   */
+  delete(email: string): Promise<boolean>;
 }

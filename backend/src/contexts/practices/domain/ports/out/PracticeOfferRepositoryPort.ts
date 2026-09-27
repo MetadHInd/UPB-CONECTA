@@ -8,5 +8,7 @@ import type { PracticeOfferDetails } from '../../entities/PracticeOffer.js';
  */
 export interface PracticeOfferRepositoryPort {
   findByMessageId(messageId: string): Promise<PracticeOfferDetails | null>;
+  /** HU-22: version en lote para el listado, sin una consulta por oferta. */
+  findByMessageIds(messageIds: readonly string[]): Promise<ReadonlyMap<string, PracticeOfferDetails>>;
   save(offer: PracticeOfferDetails): Promise<void>;
 }

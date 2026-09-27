@@ -8,6 +8,10 @@ export class InMemoryForumAuthorRepository implements ForumAuthorRepositoryPort 
     return this.authors.get(email) ?? null;
   }
 
+  async delete(email: string): Promise<boolean> {
+    return this.authors.delete(email);
+  }
+
   async save(author: ForumAuthor): Promise<void> {
     this.authors.set(author.email, author);
   }

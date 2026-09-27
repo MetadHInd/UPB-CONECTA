@@ -31,4 +31,9 @@ export class MongoForumAuthorRepository implements ForumAuthorRepositoryPort {
     const { email, ...rest } = author;
     await this.collection.replaceOne({ _id: email }, rest, { upsert: true });
   }
+
+  async delete(email: string): Promise<boolean> {
+    const result = await this.collection.deleteOne({ _id: email });
+    return result.deletedCount === 1;
+  }
 }

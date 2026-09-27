@@ -1,0 +1,75 @@
+{
+  "campusId": "bucaramanga",
+  "name": "UPB Seccional Bucaramanga",
+  "center": { "latitude": 7.0092, "longitude": -73.0694 },
+  "blocks": [
+    {
+      "id": "bloque-a",
+      "name": "Bloque A",
+      "buildings": [
+        {
+          "id": "edificio-aulas-a",
+          "name": "Edificio de Aulas A",
+          "coordinates": { "latitude": 7.0096, "longitude": -73.0698 },
+          "levels": [
+            { "id": "n0", "number": 0, "name": "Planta baja" },
+            { "id": "n1", "number": 1, "name": "Nivel 1" },
+            { "id": "n2", "number": 2, "name": "Nivel 2" },
+            { "id": "n3", "number": 3, "name": "Nivel 3" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bloque-b",
+      "name": "Bloque B",
+      "buildings": [
+        {
+          "id": "edificio-biblioteca",
+          "name": "Biblioteca",
+          "coordinates": { "latitude": 7.009, "longitude": -73.069 },
+          "levels": [
+            { "id": "n0", "number": 0, "name": "Planta baja" },
+            { "id": "n1", "number": 1, "name": "Nivel 1" },
+            { "id": "n2", "number": 2, "name": "Nivel 2" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bloque-c",
+      "name": "Bloque C",
+      "buildings": [
+        {
+          "id": "edificio-bienestar",
+          "name": "Bienestar Universitario",
+          "coordinates": { "latitude": 7.0086, "longitude": -73.07 },
+          "levels": [
+            { "id": "n0", "number": 0, "name": "Planta baja" },
+            { "id": "n1", "number": 1, "name": "Nivel 1" }
+          ]
+        },
+        {
+          "id": "edificio-cafeteria",
+          "name": "Cafetería Central",
+          "coordinates": { "latitude": 7.0093, "longitude": -73.0688 },
+          "levels": [{ "id": "n0", "number": 0, "name": "Planta baja" }]
+        }
+      ]
+    }
+  ],
+  "pointsOfInterest": [
+    { "id": "poi-cafeteria-central", "name": "Cafetería Central", "category": "cafeteria", "coordinates": { "latitude": 7.0093, "longitude": -73.0688 }, "buildingId": "edificio-cafeteria", "levelId": "n0" },
+    { "id": "poi-cafeteria-aulas", "name": "Cafetería Aulas A", "category": "cafeteria", "coordinates": { "latitude": 7.00962, "longitude": -73.06985 }, "buildingId": "edificio-aulas-a", "levelId": "n0" },
+    { "id": "poi-biblioteca", "name": "Biblioteca", "category": "biblioteca", "coordinates": { "latitude": 7.009, "longitude": -73.069 }, "buildingId": "edificio-biblioteca", "levelId": "n1" },
+    { "id": "poi-bienestar", "name": "Bienestar Universitario", "category": "bienestar", "coordinates": { "latitude": 7.0086, "longitude": -73.07 }, "buildingId": "edificio-bienestar", "levelId": "n0" },
+    { "id": "poi-coord-sistemas", "name": "Coordinación de Ingeniería de Sistemas", "category": "coordinacion", "coordinates": { "latitude": 7.0096, "longitude": -73.0698 }, "buildingId": "edificio-aulas-a", "levelId": "n2" },
+    { "id": "poi-coord-industrial", "name": "Coordinación de Ingeniería Industrial", "category": "coordinacion", "coordinates": { "latitude": 7.00958, "longitude": -73.06975 }, "buildingId": "edificio-aulas-a", "levelId": "n3" },
+    { "id": "poi-admisiones", "name": "Admisiones y Registro", "category": "punto-de-atencion", "coordinates": { "latitude": 7.00965, "longitude": -73.06975 }, "buildingId": "edificio-aulas-a", "levelId": "n1" },
+    { "id": "poi-bano-a0", "name": "Baños Aulas A, planta baja", "category": "servicio-sanitario", "coordinates": { "latitude": 7.00957, "longitude": -73.0699 }, "buildingId": "edificio-aulas-a", "levelId": "n0" },
+    { "id": "poi-bano-a2", "name": "Baños Aulas A, nivel 2", "category": "servicio-sanitario", "coordinates": { "latitude": 7.00957, "longitude": -73.0699 }, "buildingId": "edificio-aulas-a", "levelId": "n2" },
+    { "id": "poi-bano-biblioteca", "name": "Baños Biblioteca", "category": "servicio-sanitario", "coordinates": { "latitude": 7.00895, "longitude": -73.06905 }, "buildingId": "edificio-biblioteca", "levelId": "n0" },
+    { "id": "poi-parqueadero-principal", "name": "Parqueadero principal", "category": "parqueadero", "coordinates": { "latitude": 7.01, "longitude": -73.0685 }, "buildingId": null, "levelId": null },
+    { "id": "poi-parqueadero-motos", "name": "Parqueadero de motos", "category": "parqueadero", "coordinates": { "latitude": 7.0084, "longitude": -73.0692 }, "buildingId": null, "levelId": null }
+  ]
+}

@@ -99,8 +99,49 @@ Al retirar, `WithdrawConvocatoria` cancela los avisos y el planificador deja de 
 
 Mutaciones comprobadas: publicar con otra categoría hace fallar 2 pruebas; no guardar la segmentación al editar, 1; no auditar los campos propios de la práctica, 1; aceptar una fecha pasada, 2; retirar sin pasar por `WithdrawConvocatoria`, 1.
 
+## HU-22 (SCRUM-34): listado consolidado, filtros y detalle
+
+**Trazabilidad:** RF-31, RF-32, RF-33. Sin servidor HTTP ni cliente móvil: se entregan los casos de uso que esa capa invocará.
+
+| Pieza | Capa | Rol |
+|---|---|---|
+| `PracticeOfferListItem`, `PracticeOfferDetail`, `PracticeOfferStatus` | Dominio | Modelo de lectura, con estado explícito `abierta`/`cerrada` |
+| `PracticeConvocatoriaSourcePort` | Puerto | Fuente única: no distingue si la oferta llegó por correo o se cargó a mano |
+| `PracticeListingPolicy` | Dominio (servicio) | Qué se lista, filtros combinables, orden, estado y campos no informados |
+| `PracticeDuplicatePolicy` + `config/practice-listing-policy.json` | Dominio + datos | Cuándo una carga manual es una oferta ya registrada |
+| `ListPracticeOffers`, `GetPracticeOfferDetail` | Aplicación | Listado con filtros y detalle |
+| `PublishPracticeOffer` (extendido) | Aplicación | Consolida duplicados antes de publicar |
+| `CompositePracticeConvocatoriaSource` | Infraestructura | Une registro consolidado, clasificación, segmentación y `practice_offers`, en lote |
+
+### Decisiones
+
+1. **Una sola fuente, sin campo de origen.** Las dos vías ya escriben en los mismos repositorios (la ingesta directamente; la carga manual por `PublishConvocatoria`). El listado lee la clasificación con categoría `practica` y resuelve el resto en lote. El modelo no tiene campo de origen y el id de una oferta manual ya no lleva el prefijo `manual-` (`RandomManualMessageIdGenerator`); los ids emitidos antes lo conservan.
+2. **Estado.** `cerrada` solo si hay fecha de cierre anterior a ahora (mismo límite que HU-15). Sin fecha o con fecha ambigua queda `abierta`; `dueDate` conserva el matiz. Por defecto solo se listan las abiertas; `status=cerrada` o `todas` las incluye, con las vigentes primero (criterio 4). No se listan las retiradas ni las retenidas para revisión.
+3. **Filtros.** Programa (incluye lo dirigido al programa, a su facultad o a toda la comunidad), modalidad y estado, combinables. Un valor desconocido se rechaza por campo; uno vacío se ignora. Con filtro de modalidad, una oferta sin modalidad conocida no coincide.
+4. **Consolidación (criterio 5).** Al cargar a mano, `PublishPracticeOffer` busca duplicados: primero el mismo canal de postulación (URL normalizada: dominio en minúsculas, sin barra final, fragmento, parámetros `utm_*` ni puerto por defecto; correo como `mailto:`), luego la misma empresa (sin tildes ni sufijo legal) con cierre a menos de 24 h. Las reglas viven en `config/practice-listing-policy.json`. Si hay coincidencia no crea otro registro: completa el existente vía `EditConvocatoria` (auditado como `EDITED`) y conserva su identidad. Lo que diligencia el administrador prevalece sobre lo extraído del correo. Una oferta retirada no absorbe una carga nueva.
+
+### Limitaciones explícitas
+
+- **La ingesta no extrae empresa, requisitos ni modalidad.** Una oferta ingerida sin completar sale con `company`, `requirements` y `modality` en `null` y `missingFields` los nombra; el cliente debe mostrar "no informado". No se inventa ningún dato.
+- **Una oferta ingerida no se filtra por modalidad** hasta que se complete: no se puede afirmar que sea de una modalidad.
+- **Solo se consolida en el sentido ingesta → carga manual.** Si la carga manual va primero y el correo llega después, la ingesta (deduplicación por remitente y asunto, HU-03) crea otro registro. Consolidarlo requiere que la ingesta consulte `findDuplicateOffer`.
+- **El duplicado se detecta por el canal de postulación.** Una oferta ingerida sin enlace en el cuerpo, o con otro enlace, no se detecta.
+- **Las ofertas ingeridas sin clasificación** (anteriores a HU-06) no se listan: no se sabe que son prácticas.
+- **El listado carga todas las prácticas y filtra en memoria.** Aceptable con el volumen esperado de la oferta de prácticas; si crece, el filtro de estado y modalidad se empuja a Mongo.
+- **Sin ruta de retiro para una oferta ingerida sin completar** en `WithdrawPracticeOffer` (solo conoce `practice_offers`); se retira con `WithdrawConvocatoria` (HU-50).
+
+### Criterios de aceptación y pruebas
+
+| # | Criterio | Pruebas |
+|---|---|---|
+| 1 | Un listado único, sin distinción de origen | `tests/practices/PracticeOfferListing.test.ts` › criterio 1 (ingesta real más carga manual; misma forma, sin campos de origen) |
+| 2 | Filtros por programa, modalidad y estado, combinables | › criterio 2; integración Mongo |
+| 3 | Detalle con empresa, descripción, requisitos, modalidad, cierre y canal | › criterio 3 (oferta manual completa; oferta ingerida con `missingFields`) |
+| 4 | Cerrada distinguible y no mezclada | › criterio 4 |
+| 5 | Ingerida y luego cargada a mano, un solo registro | › criterio 5; `PracticeDuplicatePolicy.test.ts`; `MongoPracticeListing.integration.test.ts` |
+
 ## Pendientes
 
-- **HU-22** (listado y detalle de prácticas) debe leer `practice_offers` junto con la convocatoria. HU-24 la desbloquea.
-- **Extracción automática** de empresa, requisitos y modalidad desde el correo (decisión 1).
-- **Consolidar** una oferta cargada a mano con la misma ingerida por correo (HU-22, criterio 5).
+- **Extracción automática** de empresa, requisitos y modalidad desde el correo (decisión 1 de HU-24). Cuando exista, debe guardarlos en `practice_offers` y HU-22 los mostrará sin cambios.
+- **Capa HTTP y cliente móvil** de HU-22 (listado, filtros, detalle).
+- **Consolidar en sentido inverso** (carga manual y luego correo), ver limitaciones.

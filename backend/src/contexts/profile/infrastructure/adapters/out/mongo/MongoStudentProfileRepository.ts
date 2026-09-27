@@ -75,6 +75,11 @@ export class MongoStudentProfileRepository implements StudentProfileRepositoryPo
     return result.modifiedCount === 1;
   }
 
+  async delete(email: string): Promise<boolean> {
+    const result = await this.collection.deleteOne({ _id: email });
+    return result.deletedCount === 1;
+  }
+
   async findAll(): Promise<readonly StudentProfile[]> {
     const docs = await this.collection.find({}).toArray();
     return docs.map((doc) =>

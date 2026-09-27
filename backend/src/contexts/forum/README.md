@@ -203,7 +203,7 @@ El sistema aplica advertencia, suspensión temporal y suspensión prolongada seg
 
 ### Dependencias y pendientes
 
-- **HU-31 y HU-34 alimentan el historial.** En Jira, HU-35 está bloqueada por HU-34. La política y el historial se implementaron sin esperarla, porque `RecordInfraction` es el contrato que esas historias deben invocar al retener o bloquear un contenido. Hasta que existan, en producción nadie genera infracciones.
+- **HU-34 alimenta el historial; HU-31 ya lo hace (desde `CreatePost`, ver contexto `moderation`).** En Jira, HU-35 está bloqueada por HU-34. La política y el historial se implementaron sin esperarla, porque `RecordInfraction` es el contrato que esas historias deben invocar al retener o bloquear un contenido. Hasta que existan, en producción nadie genera infracciones.
 - **Comentar (criterio 3).** Los comentarios son HU-33 y todavía no existen. El rechazo al publicar ya funciona con las sanciones reales. `CreateComment` debe reutilizar `SanctionStatusPort` y `activeSanctionEnd`/`formatSanctionEnd` para rechazar con la misma fecha.
 - **Contenido retenido que se libera.** Si la moderación decide que un contenido retenido no infringe nada, hoy queda como `retained` en el historial, sin computar. Modelar esa liberación corresponde a HU-31/HU-52.
 - **Entrega de avisos.** Falta el canal que consuma `forum_sanction_notices`.

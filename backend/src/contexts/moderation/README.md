@@ -69,4 +69,110 @@ El criterio 2 pide ver "el contenido normalizado, el crudo original y la clasifi
 | 7 | Cualquier decisión queda auditada con usuario, acción, objeto y marca de tiempo | `tests/moderation/PublishReviewQueueItem.test.ts` (`criterio 7: ...`), `tests/moderation/DiscardReviewQueueItem.test.ts` |
 | — | Persistencia real (auditoría append-only, `findAll` de cuarentena, `findByRepresentativeMessageId`) | `tests/infrastructure/mongo/MongoModerationSupport.integration.test.ts` |
 | — | Dominio desacoplado de infraestructura | `npm run check:architecture` |
+
+---
+
+# Moderación automática previa a la publicación (HU-31)
+
+Trazabilidad: **RF-50, RF-51, RNF-05/11/19/32. CU-03.** Todo texto enviado al foro se analiza antes de hacerse visible y, según el puntaje, se publica, se retiene o se bloquea.
+
+## Diseño
+
+- `ModerationPort` (puerto de salida): recibe solo `{ text }` y devuelve `{ score }` en [0, 1]. El proveedor real de IA no existe en el repositorio: `InMemoryModerationAdapter` es un stub determinístico (no mide toxicidad real), mismo criterio que la clasificación (HU-10).
+- `ModerationDecisionPolicy` (dominio puro, fail-safe): `ModerationVerdict` (`publish` / `retain` / `block`) + `ModerationReason`. Puntaje `< lower` publica; `lower..upper` (ambos incluidos) retiene; `> upper` bloquea. Coincidencia con el diccionario bloquea siempre. Sin puntaje (fallo, plazo vencido, respuesta ilegible) o puntaje fuera de [0, 1] retiene. Es el tipo que HU-34 (reportes) puede reutilizar.
+- `BannedTermsDictionary`: palabras completas, sin distinguir mayúsculas ni tildes.
+- `buildModerationRequest`: arma lo enviado al servicio. El autor nunca viaja como campo, y se enmascaran en el texto correos, números de 6+ dígitos, el identificador estudiantil y las palabras del nombre y usuario del autor.
+- `ScreenContent` (aplicación): analiza con plazo (`timeoutMs`, obligatoriamente < 3000 ms) y decide. Nunca lanza por fallos del servicio. Se llama `ScreenContent` y no `Moderate...` porque no es una operación administrativa HTTP (el heurístico de `check:authorization` trata `Moderate*` como tal).
+- `RetainedContentQueuePort` + `MongoRetainedContentQueue` (`moderation_retained_content`): cola de revisión humana de lo retenido, con copia completa (nunca llegó a `forum_posts`). Distinta de la cola de HU-49.
+
+## Enganche con el foro
+
+`forum/application/CreatePost` invoca `ScreenContent` después de validar, autorizar y comprobar sanciones (un autor sancionado no gasta una llamada al servicio). Publicado: igual que HU-30. Retenido: se encola y se registra una infracción `retained` (no computa). Bloqueado: se registra una infracción `blocked` con `detectedBy: 'moderacion-automatica'` mediante el `RecordInfraction` de HU-35, que impone la sanción gradual si corresponde. El resultado al autor es `PostRejectionKind.RETAINED_FOR_REVIEW` o `BLOCKED_BY_MODERATION`, con mensajes que no revelan puntaje ni términos.
+
+## Configuración
+
+`config/moderation-policy.json`: `thresholds.lower/upper`, `timeoutMs` (2500) y `bannedTerms`. Los valores por defecto (0.4 / 0.8) son un punto de partida, no calibrados con datos reales.
+
+## Criterios y pruebas
+
+| Criterio | Prueba |
+|---|---|
+| 1 análisis previo | `tests/forum/AutomaticModeration.test.ts` (criterio 1), `tests/moderation/ScreenContent.test.ts` |
+| 2 diccionario | `tests/moderation/BannedTermsDictionary.test.ts`, `AutomaticModeration.test.ts` (criterio 2) |
+| 3 publica | `AutomaticModeration.test.ts` (criterio 3), `ModerationDecisionPolicy.test.ts` |
+| 4 retiene y encola | `AutomaticModeration.test.ts` (criterio 4), `tests/infrastructure/mongo/MongoRetainedContentQueue.integration.test.ts` |
+| 5 bloquea e historial | `AutomaticModeration.test.ts` (criterio 5, incluye escalado a sanción de HU-35) |
+| 6 fail-safe | `AutomaticModeration.test.ts` (criterio 6), `ScreenContent.test.ts`, `ModerationDecisionPolicy.test.ts` |
+| 7 sin datos identificatorios | `tests/moderation/ModerationRequest.test.ts`, `AutomaticModeration.test.ts` (criterio 7) |
+| 8 menos de 3 s | `ScreenContent.test.ts`, `AutomaticModeration.test.ts` (criterio 8): con el servicio colgado, el plazo lo corta |
+
+## Diferido
+
+- Proveedor real de IA: solo existe el stub; el criterio 1 se cumple a nivel de puerto. El modelo "adaptado al español" y los 3 s medidos contra un proveedor real quedan pendientes.
+- Capa HTTP/cliente móvil: `CreatePost` sigue sin endpoint.
+- Revisión humana de lo retenido (aprobar publica; rechazar bloquea y escala la infracción `retained` a `blocked`): la cola se llena, pero ningún caso de uso la consume todavía.
+- Comentarios: solo se modera la publicación; el foro aún no tiene comentarios.
+- Retroalimentación detallada al autor (HU-32) y reportes (HU-34): fuera de esta historia.
 | — | Las tres operaciones exigen rol `content-admin` | `npm run check:authorization`, `config/protected-operations.json` |
+
+## HU-32 (SCRUM-44): retroalimentación al autor sobre la decisión de moderación
+
+Trazabilidad: RF-52, RNF-31, RNF-33. Contenido del foro (HU-30) que la moderación retiene o bloquea; **no** es la cola de convocatorias de HU-49 (mismo contexto, otro modelo: `RetainedContentReview`, no `ReviewQueueItem`). Sin capa HTTP ni cliente: se entregan casos de uso, puertos y adaptadores.
+
+### Diseño: dos representaciones de una misma decisión
+
+| Representación | Tipo | Contenido | Quién la ve |
+|---|---|---|---|
+| Explicación al autor | `AuthorFeedbackView` (`in-review`, `blocked`, `approved`, `rejected`) | Aviso de revisión con plazo, o motivo y norma de convivencia (`NC-xx`) | El estudiante |
+| Registro de auditoría | `ContentModerationLogEntry` (`ContentModerationLogPort`, append-only) | Fragmento, categoría, quién decidió, origen (automático o revisión humana) y `internalDetail` (puntaje, umbral, modelo) | Administradores / sustento de la sanción |
+
+`AuthorFeedbackView` no tiene campos de puntaje, umbral ni modelo: no se filtran por construcción, y la prueba (`HandleModerationDecision.test.ts`, criterio 3) lo verifica sobre la vista y sobre el aviso persistido. Tampoco viaja el fragmento ni quién detectó.
+
+### Decisión de entrada mínima (fusión con HU-31)
+
+`domain/value-objects/ModerationDecisionInput.ts` define `{ contentId, contentKind, authorEmail, verdict: publish | retain | block, category, fragment, detectedBy, internalDetail? }`. HU-31 (decisión automática por umbral) se implementa en paralelo; al fusionar basta mapear su decisión a este tipo o reemplazar ese único archivo. Ninguna otra pieza conoce la forma de la decisión de HU-31.
+
+### Piezas
+
+| Pieza | Capa | Rol |
+|---|---|---|
+| `ModerationFeedbackConfig` + `config/moderation-feedback.json` | Dominio / dato | Plazo de resolución (24 h) y catálogo de normas por categoría; validado al cargar (`loadModerationFeedbackConfig`) |
+| `AuthorFeedbackPolicy` | Dominio (servicio puro) | Construye cada vista y el vencimiento (`retainedAt + plazo`) |
+| `RetainedContentReview`, `isReviewOverdue` | Dominio | Elemento de la cola con plazo; vencido solo después del límite exacto |
+| `HandleModerationDecision` | Aplicación | Registra, encola si retiene, avisa al autor (criterios 1, 2, 3, 5, 6). Idempotente ante reintentos |
+| `ApproveRetainedContent` / `RejectRetainedContent` | Aplicación | Revisión humana: publica o confirma el bloqueo, y avisa (criterio 4) |
+| `GetRetainedContentQueue` | Aplicación | Cola pendiente por plazo, con tiempo restante y marca de vencido |
+| `EscalateOverdueRetainedContent` | Aplicación | Avisa a administradores, una vez, de lo vencido (criterio 5); lo invoca un planificador futuro |
+| Puertos | Dominio | `RetainedContentQueuePort`, `ContentModerationLogPort`, `AuthorFeedbackNotificationPort`, `ModerationAdminAlertPort`, `HeldContentPublisherPort` |
+| Adaptadores | Infraestructura | Memoria y Mongo: `moderation_retained_content`, `moderation_content_decisions`, `moderation_notices` |
+
+### Decisiones
+
+- **Se registran solo retener y bloquear** (más la aprobación humana de lo retenido). Publicar directo no motiva nada y no genera registro, aviso ni cola. Una decisión de retener o bloquear sin categoría o sin fragmento se **rechaza** sin registrar ni avisar (criterio 6: sin sustento no hay decisión); una categoría sin norma configurada también (`unknown-category`).
+- **La aprobación humana se registra con la categoría y el fragmento de la retención revertida**, y el revisor, para que el historial completo del contenido sea trazable.
+- **Bloquear algo retenido** cierra su revisión pendiente como `rejected` (no vuelve a vencerse ni a escalarse).
+- **Aprobar publica primero**: si `HeldContentPublisherPort` falla, la revisión sigue pendiente, sin aviso ni registro de una publicación que no ocurrió.
+- **Bandeja propia** (`MongoModerationNoticeOutbox`, mismo patrón que `MongoSanctionNoticeOutbox` de HU-35): no se reutiliza la del foro porque sus avisos son del tipo `SanctionNotice` y acoplaría `moderation` a `forum`; el registro de dispositivos y avisos de `notifications` es de convocatorias. Sigue sin haber canal de entrega real.
+- **Correo del autor**: se normaliza con el mismo criterio que el foro (`trim` + minúsculas), sin importar `forum`.
+
+### Autorización (HU-46)
+
+`GetRetainedContentQueue`, `ApproveRetainedContent` y `RejectRetainedContent` están en `config/protected-operations.json` con rol `content-admin`. `HandleModerationDecision` y `EscalateOverdueRetainedContent` son internos (los invoca la moderación o un planificador), no operaciones HTTP.
+
+### Diferido
+
+- **Publicar de verdad lo aprobado**: no existe adaptador de `HeldContentPublisherPort` porque el foro aún no retiene contenido antes de publicarlo (llega con HU-31). Hay un adaptador en memoria solo para pruebas.
+- **Sanción por bloqueo**: no se invoca `RecordInfraction` (foro, HU-35) desde aquí; quien conecte HU-31 debe llamarlo tras un bloqueo (automático, o `RejectRetainedContent`).
+- **Entrega real de avisos** (push/correo) y **planificador** de `EscalateOverdueRetainedContent`: solo la bandeja persistente y el caso de uso.
+- **Que la resolución ocurra dentro de 24 h** es una obligación operativa: el sistema garantiza la cola, el plazo, la visibilidad de lo vencido y la alerta a administradores, no que una persona actúe.
+
+### Criterios de aceptación y pruebas
+
+| Criterio | Prueba |
+|---|---|
+| 1 Retenido: aviso de revisión con plazo máximo | `tests/moderation/HandleModerationDecision.test.ts` (`criterio 1`) |
+| 2 Bloqueado: motivo y norma | `HandleModerationDecision.test.ts` (`criterio 2`), `ResolveRetainedContent.test.ts` (rechazo humano) |
+| 3 Sin puntaje, umbral ni detalle del modelo | `HandleModerationDecision.test.ts` (`criterio 3`), `ResolveRetainedContent.test.ts`, `MongoModerationFeedback.integration.test.ts` |
+| 4 Aprobación humana publica e informa | `ResolveRetainedContent.test.ts` (`ApproveRetainedContent`) |
+| 5 Cola y plazo de 24 h | `HandleModerationDecision.test.ts` (`criterio 5`), `ResolveRetainedContent.test.ts` (cola, límite exacto, escalado), `ModerationFeedbackConfig.test.ts` |
+| 6 Fragmento y categoría conservados | `HandleModerationDecision.test.ts` (`criterio 6`), `ResolveRetainedContent.test.ts`, `MongoModerationFeedback.integration.test.ts` |

@@ -60,5 +60,12 @@ export interface ConsolidatedMessageRegistryPort {
    */
   findByRepresentativeMessageId(messageId: string): Promise<ConsolidatedMessageRecord | null>;
 
+  /**
+   * HU-22: version en lote de `findByRepresentativeMessageId`, para que el
+   * listado de practicas no consulte una vez por oferta (mismo principio que
+   * `ProgramTargetingRepositoryPort.findByMessageIds`, HU-55). Aditivo.
+   */
+  findByRepresentativeMessageIds(messageIds: readonly string[]): Promise<readonly ConsolidatedMessageRecord[]>;
+
   save(record: ConsolidatedMessageRecord): Promise<void>;
 }

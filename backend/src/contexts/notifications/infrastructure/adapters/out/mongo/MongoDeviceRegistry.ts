@@ -83,4 +83,14 @@ export class MongoDeviceRegistry implements DeviceRegistryPort {
     const found = await this.collection.find({ studentId, status: 'active' }).toArray();
     return found.map(toRecord);
   }
+
+  async findAllForStudent(studentId: string): Promise<readonly DeviceRegistration[]> {
+    const found = await this.collection.find({ studentId }).toArray();
+    return found.map(toRecord);
+  }
+
+  async deleteAllForStudent(studentId: string): Promise<number> {
+    const result = await this.collection.deleteMany({ studentId });
+    return result.deletedCount;
+  }
 }

@@ -32,6 +32,11 @@ export class InMemoryConsolidatedMessageRegistry implements ConsolidatedMessageR
     return null;
   }
 
+  async findByRepresentativeMessageIds(messageIds: readonly string[]): Promise<readonly ConsolidatedMessageRecord[]> {
+    const wanted = new Set(messageIds);
+    return [...this.groups.values()].filter((record) => record.representativeMessageId != null && wanted.has(record.representativeMessageId));
+  }
+
   async save(record: ConsolidatedMessageRecord): Promise<void> {
     this.groups.set(convocatoriaIdToString(record), record);
   }

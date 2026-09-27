@@ -1,6 +1,6 @@
 export type RefreshTokenStatus = 'active' | 'used' | 'revoked';
 
-export type RefreshTokenRevocationReason = 'logout' | 'reuse-detected';
+export type RefreshTokenRevocationReason = 'logout' | 'reuse-detected' | 'data-erasure';
 
 /**
  * Estado persistido de un refresh token emitido (HU-45). El token firmado no
@@ -8,7 +8,7 @@ export type RefreshTokenRevocationReason = 'logout' | 'reuse-detected';
  *
  * - `active`: el unico token de la cadena que todavia permite renovar.
  * - `used`: ya se roto; si vuelve a presentarse es un reuso (criterio 4).
- * - `revoked`: la cadena se invalido por cierre de sesion o por reuso.
+ * - `revoked`: la cadena se invalido por cierre de sesion, por reuso o por supresion de datos (HU-48).
  */
 export interface RefreshTokenRecord {
   readonly tokenId: string;

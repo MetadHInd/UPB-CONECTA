@@ -32,4 +32,12 @@ export class InMemoryRefreshTokenRepository implements RefreshTokenRepositoryPor
   async isChainRevoked(chainId: string): Promise<boolean> {
     return this.revokedChains.has(chainId);
   }
+
+  async findLiveChainIdsBySubject(subject: string): Promise<readonly string[]> {
+    const chains = new Set<string>();
+    for (const record of this.tokens.values()) {
+      if (record.subject === subject && record.status !== 'revoked') chains.add(record.chainId);
+    }
+    return [...chains];
+  }
 }

@@ -8,6 +8,12 @@ import {
   validatePostContent,
   type PostView
 } from '../domain/entities/Post.js';
+import { InfractionOutcome } from '../domain/entities/Infraction.js';
+import { ModerationReason, ModerationVerdict, type ModerationDecision } from '../../moderation/domain/services/ModerationDecisionPolicy.js';
+import type { ScreenContent } from '../../moderation/application/ScreenContent.js';
+import type { HandleModerationDecision } from '../../moderation/application/HandleModerationDecision.js';
+import type { HeldContentStorePort } from '../../moderation/domain/ports/out/HeldContentStorePort.js';
+import type { RecordInfraction } from './RecordInfraction.js';
 import { ForumAccessPolicy } from '../domain/services/ForumAccessPolicy.js';
 import { formatSanctionEnd } from '../domain/services/SanctionMessages.js';
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
@@ -25,8 +31,20 @@ export enum PostRejectionKind {
   AUTHOR_NOT_VERIFIED = 'author-not-verified',
   TOPIC_NOT_FOUND = 'topic-not-found',
   TOPIC_RESTRICTED = 'topic-restricted',
-  SANCTIONED = 'sanctioned'
+  SANCTIONED = 'sanctioned',
+  /** HU-31: la moderación automática dejó el texto en revisión humana; no es visible todavía. */
+  RETAINED_FOR_REVIEW = 'retained-for-review',
+  /** HU-31: la moderación automática lo bloqueó; sumó al historial de infracciones. */
+  BLOCKED_BY_MODERATION = 'blocked-by-moderation'
 }
+
+export const RETAINED_FOR_REVIEW_MESSAGE =
+  'Tu publicación quedó en revisión. Un moderador la revisará y, si cumple las normas de convivencia, se hará visible.';
+export const BLOCKED_BY_MODERATION_MESSAGE =
+  'Tu publicación no cumple las normas de convivencia del foro, por lo que no se publicó.';
+
+/** Quién registra las infracciones que genera la moderación automática (HU-31). */
+export const AUTOMATIC_MODERATION_DETECTOR = 'moderacion-automatica';
 
 export interface CreatePostInput {
   /** Sujeto de la sesion verificada (HU-45); nunca un valor que el cliente elija. */
@@ -64,6 +82,12 @@ export class CreatePost {
       readonly clock: ClockPort;
       readonly ids: ForumIdGeneratorPort;
       readonly faculties: FacultyProgramResolver;
+      /** HU-31: nada se hace visible sin pasar por aquí. */
+      readonly moderate: ScreenContent;
+      readonly reviewQueue: HeldContentStorePort;
+      readonly recordInfraction: RecordInfraction;
+      /** HU-32: registra la decisión, abre la revisión con plazo y avisa al autor sin exponer el detalle del modelo. */
+      readonly decisions: HandleModerationDecision;
     }
   ) {
     this.policy = new ForumAccessPolicy(dependencies.faculties);
@@ -124,8 +148,27 @@ export class CreatePost {
     }
 
     // `decidePublication` solo autoriza con autor verificado y tema activo.
+    const postId = ids.newId();
+
+    // HU-31: antes de hacerse visible, el texto se analiza (sin datos del autor) y se decide. Ver `ScreenContent`.
+    const moderation = await this.dependencies.moderate.execute({
+      title: content.title,
+      text: content.text,
+      author: { name: author!.name, email: author!.email }
+    });
+    if (moderation.verdict !== ModerationVerdict.PUBLISH) {
+      return this.holdBack(moderation, {
+        id: postId,
+        topicId: topic!.id,
+        author: { email: author!.email, name: author!.name, programName: author!.programName, programId: author!.programId },
+        title: content.title,
+        text: content.text,
+        now
+      });
+    }
+
     const post = {
-      id: ids.newId(),
+      id: postId,
       topicId: topic!.id,
       author: { email: author!.email, name: author!.name, programName: author!.programName, programId: author!.programId },
       // HU-47, criterio 7: neutraliza marcado/scripts embebidos antes de persistir (ver hardening/domain/services/HtmlEncoding.ts).
@@ -135,6 +178,78 @@ export class CreatePost {
     };
     await posts.save(post);
     return { ok: true, post: toPostView(post) };
+  }
+
+  /** Retiene o bloquea (HU-31 criterios 4 a 6). Nada de esto llega a `forum_posts`. */
+  private async holdBack(
+    decision: ModerationDecision,
+    submission: {
+      readonly id: string;
+      readonly topicId: string;
+      readonly author: { readonly email: string; readonly name: string; readonly programName: string; readonly programId: string | null };
+      readonly title: string;
+      readonly text: string;
+      readonly now: Date;
+    }
+  ): Promise<CreatePostResult> {
+    const { reviewQueue, recordInfraction, decisions } = this.dependencies;
+    const retained = decision.verdict === ModerationVerdict.RETAIN;
+
+    if (retained) {
+      await reviewQueue.enqueue({
+        id: submission.id,
+        kind: 'post',
+        topicId: submission.topicId,
+        author: submission.author,
+        // Se guarda ya neutralizado: quien lo revise nunca ve marcado activo (HU-47 criterio 7).
+        title: neutralizeHtml(submission.title),
+        text: neutralizeHtml(submission.text),
+        reason: decision.reason,
+        score: decision.score,
+        retainedAt: submission.now
+      });
+    }
+    // Un retenido queda como `retained` (no computa para sancionar); un bloqueado suma al historial de HU-35.
+    await recordInfraction.execute({
+      studentEmail: submission.author.email,
+      content: { kind: 'post', id: submission.id, topicId: submission.topicId, title: submission.title, text: submission.text },
+      outcome: retained ? InfractionOutcome.RETAINED : InfractionOutcome.BLOCKED,
+      reason: infractionReason(decision),
+      detectedBy: AUTOMATIC_MODERATION_DETECTOR
+    });
+    // Si esto falla el contenido ya está retenido o bloqueado: es fail-safe, solo se pierde el aviso.
+    await decisions.execute({
+      contentId: submission.id,
+      contentKind: 'post',
+      authorEmail: submission.author.email,
+      verdict: retained ? 'retain' : 'block',
+      // La política automática no clasifica el tipo de infracción: se usa la norma general hasta que exista una clasificación por categoría.
+      category: GENERAL_MODERATION_CATEGORY,
+      fragment: neutralizeHtml(submission.text).slice(0, MODERATION_FRAGMENT_MAX_LENGTH),
+      detectedBy: AUTOMATIC_MODERATION_DETECTOR,
+      internalDetail: { reason: decision.reason, score: decision.score }
+    });
+    return retained
+      ? reject(PostRejectionKind.RETAINED_FOR_REVIEW, RETAINED_FOR_REVIEW_MESSAGE)
+      : reject(PostRejectionKind.BLOCKED_BY_MODERATION, BLOCKED_BY_MODERATION_MESSAGE);
+  }
+}
+
+const GENERAL_MODERATION_CATEGORY = 'other';
+const MODERATION_FRAGMENT_MAX_LENGTH = 200;
+
+function infractionReason(decision: ModerationDecision): string {
+  switch (decision.reason) {
+    case ModerationReason.BANNED_TERM:
+      return 'Coincidencia con el diccionario de términos vetados.';
+    case ModerationReason.ABOVE_UPPER_THRESHOLD:
+      return `Lenguaje ofensivo detectado por la moderación automática (puntaje ${decision.score}).`;
+    case ModerationReason.BETWEEN_THRESHOLDS:
+      return `Posible lenguaje ofensivo, pendiente de revisión humana (puntaje ${decision.score}).`;
+    case ModerationReason.SERVICE_UNAVAILABLE:
+      return 'Retenido sin análisis: el servicio de moderación no respondió.';
+    default:
+      return 'Retenido: la moderación automática no pudo evaluar el texto.';
   }
 }
 

@@ -1,3 +1,8 @@
+import { HandleModerationDecision } from '../../src/contexts/moderation/application/HandleModerationDecision.js';
+import { parseModerationFeedbackConfig } from '../../src/contexts/moderation/domain/value-objects/ModerationFeedbackConfig.js';
+import { InMemoryAuthorFeedbackNotices } from '../../src/contexts/moderation/infrastructure/adapters/out/memory/InMemoryAuthorFeedbackNotices.js';
+import { InMemoryContentModerationLog } from '../../src/contexts/moderation/infrastructure/adapters/out/memory/InMemoryContentModerationLog.js';
+import { InMemoryRetainedContentQueue } from '../../src/contexts/moderation/infrastructure/adapters/out/memory/InMemoryRetainedContentQueue.js';
 import { CreatePost } from '../../src/contexts/forum/application/CreatePost.js';
 import { GetModerationHistory } from '../../src/contexts/forum/application/GetModerationHistory.js';
 import { ListTopicPosts } from '../../src/contexts/forum/application/ListTopicPosts.js';
@@ -11,6 +16,7 @@ import { SyncForumAuthor } from '../../src/contexts/forum/application/SyncForumA
 import { SanctionLevel } from '../../src/contexts/forum/domain/entities/Sanction.js';
 import type { ForumAuthorRepositoryPort } from '../../src/contexts/forum/domain/ports/out/ForumAuthorRepositoryPort.js';
 import type { PostRepositoryPort } from '../../src/contexts/forum/domain/ports/out/PostRepositoryPort.js';
+import type { HeldContentStorePort } from '../../src/contexts/moderation/domain/ports/out/HeldContentStorePort.js';
 import type { InfractionRepositoryPort } from '../../src/contexts/forum/domain/ports/out/InfractionRepositoryPort.js';
 import type { SanctionRepositoryPort } from '../../src/contexts/forum/domain/ports/out/SanctionRepositoryPort.js';
 import type { SanctionThresholdsRepositoryPort } from '../../src/contexts/forum/domain/ports/out/SanctionThresholdsRepositoryPort.js';
@@ -32,6 +38,10 @@ import type { InstitutionalProgramCatalog } from '../../src/contexts/targeting/d
 import { FacultyProgramResolver } from '../../src/contexts/targeting/domain/services/FacultyProgramResolver.js';
 import { ProgramCatalogMatcher } from '../../src/contexts/targeting/domain/services/ProgramCatalogMatcher.js';
 import { buildSessionHarness } from '../identity/sessionHarness.js';
+import { ScreenContent } from '../../src/contexts/moderation/application/ScreenContent.js';
+import { ModerationThresholds } from '../../src/contexts/moderation/domain/value-objects/ModerationThresholds.js';
+import { InMemoryHeldContentStore } from '../../src/contexts/moderation/infrastructure/adapters/out/memory/InMemoryHeldContentStore.js';
+import { ScriptedModerationPort } from '../moderation/ScriptedModerationPort.js';
 
 export const FORUM_CATALOG: InstitutionalProgramCatalog = {
   faculties: [
@@ -65,6 +75,7 @@ export function buildForumHarness(
     readonly infractions?: InfractionRepositoryPort;
     readonly sanctions?: SanctionRepositoryPort;
     readonly thresholds?: SanctionThresholdsRepositoryPort;
+    readonly retainedQueue?: HeldContentStorePort;
   } = {}
 ) {
   let now = new Date('2026-09-22T12:00:00Z');
@@ -79,6 +90,13 @@ export function buildForumHarness(
   const sanctionAudit = new InMemorySanctionAuditLog();
   const notifications = new InMemorySanctionNotifications();
   const ids = new RandomForumIdGenerator();
+  // HU-31: por defecto el servicio de moderación responde un puntaje limpio; cada prueba lo cambia con `moderationPort.script`.
+  const moderationPort = new ScriptedModerationPort({ score: 0.05 });
+  const reviewQueue = options.retainedQueue ?? new InMemoryHeldContentStore();
+  const moderate = new ScreenContent({
+    moderation: moderationPort,
+    policy: { thresholds: ModerationThresholds.of(0.4, 0.8), bannedTerms: ['idiota', 'hijo de puta'], timeoutMs: 100 }
+  });
   const faculties = new FacultyProgramResolver(FORUM_CATALOG);
   const syncAuthor = new SyncForumAuthor({ authors, clock, programs: new ProgramCatalogMatcher(FORUM_CATALOG) });
   const identity = buildSessionHarness({
@@ -88,7 +106,28 @@ export function buildForumHarness(
     identity.provider.register({ username: profile.email, password: PASSWORD, profile });
   }
 
+  const retentionQueue = new InMemoryRetainedContentQueue();
+  const moderationLog = new InMemoryContentModerationLog();
+  const authorNotices = new InMemoryAuthorFeedbackNotices();
+  const decisions = new HandleModerationDecision({
+    config: parseModerationFeedbackConfig({
+      resolutionDeadlineHours: 24,
+      norms: [{ category: 'other', code: 'NC-07', title: 'Convivencia general', text: 'El contenido incumple las normas generales de convivencia.' }]
+    }),
+    queue: retentionQueue,
+    log: moderationLog,
+    notifications: authorNotices,
+    clock
+  });
+  const recordInfraction = new RecordInfraction({ infractions, sanctions, thresholds, notifications, audit: sanctionAudit, clock, ids });
+
   return {
+    moderationPort,
+    reviewQueue,
+    decisions,
+    moderationLog,
+    authorNotices,
+    retentionQueue,
     topics,
     posts,
     authors,
@@ -129,10 +168,10 @@ export function buildForumHarness(
     seed: new SeedDefaultTopics({ topics, clock }),
     seedTopics: DEFAULT_FORUM_TOPICS,
     manage: new ManageTopics({ topics, clock, catalog: FORUM_CATALOG }),
-    createPost: new CreatePost({ topics, posts, authors, sanctions, audit, clock, ids, faculties }),
+    createPost: new CreatePost({ topics, posts, authors, sanctions, audit, clock, ids, faculties, moderate, reviewQueue, recordInfraction, decisions }),
     listTopics: new ListTopics({ topics, authors, faculties }),
     listPosts: new ListTopicPosts({ topics, posts, authors, audit, clock, faculties }),
-    recordInfraction: new RecordInfraction({ infractions, sanctions, thresholds, notifications, audit: sanctionAudit, clock, ids }),
+    recordInfraction,
     history: new GetModerationHistory({ infractions, sanctions, thresholds, clock }),
     revokeSanction: new RevokeSanction({ sanctions, notifications, audit: sanctionAudit, clock }),
     manageThresholds: new ManageSanctionThresholds({ thresholds, audit: sanctionAudit, clock })
