@@ -11,9 +11,20 @@
     { "operation": "PublishPracticeOffer", "requiredRole": "content-admin" },
     { "operation": "EditPracticeOffer", "requiredRole": "content-admin" },
     { "operation": "WithdrawPracticeOffer", "requiredRole": "content-admin" },
+    { "operation": "PublishKnowledgeEntry", "requiredRole": "content-admin" },
+    { "operation": "EditKnowledgeEntry", "requiredRole": "content-admin" },
+    { "operation": "WithdrawKnowledgeEntry", "requiredRole": "content-admin" },
+    { "operation": "ListKnowledgeEntries", "requiredRole": "content-admin" },
+    { "operation": "GetKnowledgeEntryHistory", "requiredRole": "content-admin" },
     { "operation": "GetReviewQueue", "requiredRole": "content-admin" },
     { "operation": "PublishReviewQueueItem", "requiredRole": "content-admin" },
     { "operation": "DiscardReviewQueueItem", "requiredRole": "content-admin" },
-    { "operation": "GetOperationsDashboard", "requiredRole": "content-admin" }
+    { "operation": "GetOperationsDashboard", "requiredRole": "content-admin" },
+    { "operation": "GetReportQueue", "requiredRole": "content-admin" },
+    { "operation": "ReviewReportedContent", "requiredRole": "content-admin" },
+    { "operation": "GetReportAbuseFlags", "requiredRole": "content-admin" },
+    { "operation": "GetRetainedContentQueue", "requiredRole": "content-admin" },
+    { "operation": "ApproveRetainedContent", "requiredRole": "content-admin" },
+    { "operation": "RejectRetainedContent", "requiredRole": "content-admin" }
   ]
 }

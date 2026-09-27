@@ -1,0 +1,15 @@
+{
+  "institutionalApp": "aplicación institucional de la UPB",
+  "topics": [
+    {
+      "id": "notas",
+      "label": "tus notas",
+      "keywords": ["mis notas", "mi nota", "calificaciones", "mi promedio", "promedio academico", "nota del parcial", "nota final"]
+    },
+    {
+      "id": "estado-academico",
+      "label": "tu estado académico",
+      "keywords": ["estado academico", "historial academico", "creditos aprobados", "prueba academica", "mi matricula", "materias inscritas", "mi horario de clases"]
+    }
+  ]
+}

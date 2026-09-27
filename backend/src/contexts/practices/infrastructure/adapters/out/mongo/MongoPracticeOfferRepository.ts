@@ -43,6 +43,12 @@ export class MongoPracticeOfferRepository implements PracticeOfferRepositoryPort
     return doc ? toOffer(doc) : null;
   }
 
+  async findByMessageIds(messageIds: readonly string[]): Promise<ReadonlyMap<string, PracticeOfferDetails>> {
+    if (messageIds.length === 0) return new Map();
+    const docs = await this.collection.find({ _id: { $in: [...messageIds] } }).toArray();
+    return new Map(docs.map((doc) => [doc._id, toOffer(doc)]));
+  }
+
   async save(offer: PracticeOfferDetails): Promise<void> {
     const { messageId, ...rest } = offer;
     await this.collection.replaceOne({ _id: messageId }, rest, { upsert: true });

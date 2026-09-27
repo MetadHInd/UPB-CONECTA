@@ -37,6 +37,16 @@ export class InMemoryDeviceRegistry implements DeviceRegistryPort {
     return [...this.devices.values()].filter((d) => d.studentId === studentId && d.status === 'active');
   }
 
+  async findAllForStudent(studentId: string): Promise<readonly DeviceRegistration[]> {
+    return [...this.devices.values()].filter((d) => d.studentId === studentId);
+  }
+
+  async deleteAllForStudent(studentId: string): Promise<number> {
+    const owned = [...this.devices.values()].filter((d) => d.studentId === studentId);
+    for (const device of owned) this.devices.delete(device.deviceToken);
+    return owned.length;
+  }
+
   get size(): number {
     return this.devices.size;
   }

@@ -59,8 +59,8 @@ describe('HU-24 — carga manual de ofertas de práctica por el administrador (R
     it('acepta toda la comunidad o una facultad como destinatarios', async () => {
       const practices = buildPracticesHarness();
 
-      const all = await publishValid(practices, { company: 'A', targeting: { kind: 'all-community' } });
-      const faculty = await publishValid(practices, { company: 'B', targeting: { kind: 'faculty', facultyId: 'ingenieria' } });
+      const all = await publishValid(practices, { company: 'A', applicationChannel: 'https://a.example.com', targeting: { kind: 'all-community' } });
+      const faculty = await publishValid(practices, { company: 'B', applicationChannel: 'https://b.example.com', targeting: { kind: 'faculty', facultyId: 'ingenieria' } });
 
       expect((await practices.targetingRepo.findByMessageId(all.messageId))?.targeting).toEqual({ kind: 'all-community' });
       expect((await practices.targetingRepo.findByMessageId(faculty.messageId))?.targeting).toEqual({ kind: 'faculty', facultyId: 'ingenieria' });

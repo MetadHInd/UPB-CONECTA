@@ -19,6 +19,16 @@ export interface Post {
   readonly title: string;
   readonly text: string;
   readonly publishedAt: Date;
+  /**
+   * Ocultamiento preventivo por reportes de la comunidad (HU-34): mientras
+   * tenga fecha, la publicacion no aparece en el tema hasta que un
+   * administrador la revise. Solo lo escribe el contexto `reports`.
+   */
+  readonly hiddenAt?: Date | null;
+}
+
+export function isPostHidden(post: Pick<Post, 'hiddenAt'>): boolean {
+  return post.hiddenAt !== undefined && post.hiddenAt !== null;
 }
 
 export const POST_LIMITS = { titleMax: 150, textMax: 5000 } as const;

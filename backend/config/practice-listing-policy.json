@@ -1,0 +1,6 @@
+{
+  "trackingQueryParams": ["fbclid", "gclid", "mc_cid", "mc_eid", "ref", "source"],
+  "trackingQueryParamPrefixes": ["utm_"],
+  "companyLegalSuffixes": ["sa", "sas", "ltda", "ltd", "inc", "sl", "cia"],
+  "companyMatchWindowHours": 24
+}

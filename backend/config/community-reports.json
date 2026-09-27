@@ -1,0 +1,12 @@
+{
+  "hideThreshold": 3,
+  "causes": [
+    { "id": "spam", "label": "Spam o publicidad no autorizada" },
+    { "id": "offensive-language", "label": "Lenguaje ofensivo" },
+    { "id": "harassment", "label": "Acoso o ataque a otra persona" },
+    { "id": "misinformation", "label": "Información falsa o engañosa" },
+    { "id": "inappropriate-content", "label": "Contenido inapropiado" },
+    { "id": "other", "label": "Otra causa", "requiresDetail": true }
+  ],
+  "abuse": { "unfoundedReportsThreshold": 3, "windowDays": 90 }
+}

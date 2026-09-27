@@ -8,4 +8,8 @@ export interface PersonalStateRepositoryPort {
   findSavedByStudent(studentId: string): Promise<readonly ConvocatoriaPersonalState[]>;
   /** Criterio 3: los archivados siguen siendo recuperables. */
   findArchivedByStudent(studentId: string): Promise<readonly ConvocatoriaPersonalState[]>;
+  /** HU-48 (consulta): todo lo que se conserva del estudiante, sin importar el estado. */
+  findAllByStudent(studentId: string): Promise<readonly ConvocatoriaPersonalState[]>;
+  /** HU-48 (supresion): borra todo el estado del estudiante; devuelve cuantos registros elimino. */
+  deleteAllByStudent(studentId: string): Promise<number>;
 }

@@ -92,6 +92,13 @@ export class MongoConsolidatedMessageRegistry implements ConsolidatedMessageRegi
     return found ? toRecord(found) : null;
   }
 
+  /** Una consulta con `$in` sobre `idx_representative_message`. */
+  async findByRepresentativeMessageIds(messageIds: readonly string[]): Promise<readonly ConsolidatedMessageRecord[]> {
+    if (messageIds.length === 0) return [];
+    const docs = await this.collection.find({ representativeMessageId: { $in: [...messageIds] } }).toArray();
+    return docs.map(toRecord);
+  }
+
   async save(record: ConsolidatedMessageRecord): Promise<void> {
     const _id = convocatoriaIdToString(record);
     await this.collection.updateOne(

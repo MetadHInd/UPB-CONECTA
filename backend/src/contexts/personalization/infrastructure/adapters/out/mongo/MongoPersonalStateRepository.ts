@@ -76,4 +76,14 @@ export class MongoPersonalStateRepository implements PersonalStateRepositoryPort
     const found = await this.collection.find({ studentId, archived: true }).toArray();
     return found.map(toRecord);
   }
+
+  async findAllByStudent(studentId: string): Promise<readonly ConvocatoriaPersonalState[]> {
+    const found = await this.collection.find({ studentId }).toArray();
+    return found.map(toRecord);
+  }
+
+  async deleteAllByStudent(studentId: string): Promise<number> {
+    const result = await this.collection.deleteMany({ studentId });
+    return result.deletedCount;
+  }
 }

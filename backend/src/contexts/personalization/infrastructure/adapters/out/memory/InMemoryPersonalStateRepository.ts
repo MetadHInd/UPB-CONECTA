@@ -20,6 +20,16 @@ export class InMemoryPersonalStateRepository implements PersonalStateRepositoryP
     return [...this.states.values()].filter((s) => s.studentId === studentId && s.saved);
   }
 
+  async findAllByStudent(studentId: string): Promise<readonly ConvocatoriaPersonalState[]> {
+    return [...this.states.values()].filter((s) => s.studentId === studentId);
+  }
+
+  async deleteAllByStudent(studentId: string): Promise<number> {
+    const owned = [...this.states.entries()].filter(([, s]) => s.studentId === studentId);
+    for (const [stateKey] of owned) this.states.delete(stateKey);
+    return owned.length;
+  }
+
   async findArchivedByStudent(studentId: string): Promise<readonly ConvocatoriaPersonalState[]> {
     return [...this.states.values()].filter((s) => s.studentId === studentId && s.archived);
   }

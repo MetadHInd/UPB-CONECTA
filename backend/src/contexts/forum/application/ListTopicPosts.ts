@@ -1,6 +1,6 @@
 import type { FacultyProgramResolver } from '../../targeting/domain/services/FacultyProgramResolver.js';
 import { isVerifiedAuthor, normalizeForumEmail } from '../domain/entities/ForumAuthor.js';
-import { toPostView, type PostView } from '../domain/entities/Post.js';
+import { isPostHidden, toPostView, type PostView } from '../domain/entities/Post.js';
 import { ForumAccessPolicy } from '../domain/services/ForumAccessPolicy.js';
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
 import type { ForumAccessAuditPort } from '../domain/ports/out/ForumAccessAuditPort.js';
@@ -57,6 +57,8 @@ export class ListTopicPosts {
       return { ok: false, error: 'topic-not-found', message: 'El tema no existe o fue retirado.' };
     }
 
-    return { ok: true, posts: (await posts.findByTopic(input.topicId)).map(toPostView) };
+    // HU-34: lo ocultado preventivamente no se muestra hasta que un administrador lo revise.
+    const visible = (await posts.findByTopic(input.topicId)).filter((post) => !isPostHidden(post));
+    return { ok: true, posts: visible.map(toPostView) };
   }
 }

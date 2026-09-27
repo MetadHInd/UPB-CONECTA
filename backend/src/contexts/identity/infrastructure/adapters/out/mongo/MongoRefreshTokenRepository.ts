@@ -52,7 +52,7 @@ export class MongoRefreshTokenRepository implements RefreshTokenRepositoryPort {
   }
 
   /**
-   * `idx_chain_status` sirve a `revokeChain` (todos los tokens de una cadena).
+   * `idx_chain_status` sirve a `revokeChain` (todos los tokens de una cadena); `idx_subject_status`, a la revocacion por titular (HU-48).
    * `ttl_expires_at` purga los tokens vencidos: un token expirado ya no pasa la
    * verificacion de firma, asi que su registro no aporta a la deteccion de reuso.
    * La coleccion de cadenas revocadas solo se consulta por `_id` y no necesita
@@ -61,6 +61,7 @@ export class MongoRefreshTokenRepository implements RefreshTokenRepositoryPort {
   static async ensureIndexes(db: Db, tokensCollection = MongoRefreshTokenRepository.TOKENS_COLLECTION): Promise<void> {
     const tokens = db.collection(tokensCollection);
     await tokens.createIndex({ chainId: 1, status: 1 }, { name: 'idx_chain_status' });
+    await tokens.createIndex({ subject: 1, status: 1 }, { name: 'idx_subject_status' });
     await tokens.createIndex({ expiresAt: 1 }, { name: 'ttl_expires_at', expireAfterSeconds: 0 });
   }
 
@@ -97,5 +98,9 @@ export class MongoRefreshTokenRepository implements RefreshTokenRepositoryPort {
 
   async isChainRevoked(chainId: string): Promise<boolean> {
     return (await this.revoked.countDocuments({ _id: chainId }, { limit: 1 })) > 0;
+  }
+
+  async findLiveChainIdsBySubject(subject: string): Promise<readonly string[]> {
+    return this.tokens.distinct('chainId', { subject, status: { $ne: 'revoked' } });
   }
 }

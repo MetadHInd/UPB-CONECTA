@@ -16,4 +16,8 @@ export interface DeviceRegistryPort {
   findByToken(deviceToken: string): Promise<DeviceRegistration | null>;
   /** Todos los dispositivos vigentes del estudiante, para el abanico de un aviso. Criterio 4. */
   findActiveForStudent(studentId: string): Promise<readonly DeviceRegistration[]>;
+  /** HU-48 (consulta): todos los dispositivos del estudiante, vigentes o invalidados. */
+  findAllForStudent(studentId: string): Promise<readonly DeviceRegistration[]>;
+  /** HU-48 (supresion): borra los registros del estudiante (el token es dato personal); devuelve cuantos. */
+  deleteAllForStudent(studentId: string): Promise<number>;
 }

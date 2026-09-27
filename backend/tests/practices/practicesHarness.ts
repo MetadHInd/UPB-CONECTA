@@ -20,6 +20,10 @@ import { InMemoryNotificationPreferencesRepository } from '../../src/contexts/no
 import { EditPracticeOffer } from '../../src/contexts/practices/application/EditPracticeOffer.js';
 import { PublishPracticeOffer } from '../../src/contexts/practices/application/PublishPracticeOffer.js';
 import { WithdrawPracticeOffer } from '../../src/contexts/practices/application/WithdrawPracticeOffer.js';
+import { GetPracticeOfferDetail } from '../../src/contexts/practices/application/GetPracticeOfferDetail.js';
+import { ListPracticeOffers } from '../../src/contexts/practices/application/ListPracticeOffers.js';
+import { loadPracticeListingPolicy } from '../../src/contexts/practices/infrastructure/config/PracticeListingPolicyConfig.js';
+import { CompositePracticeConvocatoriaSource } from '../../src/contexts/practices/infrastructure/adapters/out/composite/CompositePracticeConvocatoriaSource.js';
 import type { PracticeOfferRepositoryPort } from '../../src/contexts/practices/domain/ports/out/PracticeOfferRepositoryPort.js';
 import { InMemoryPracticeOfferRepository } from '../../src/contexts/practices/infrastructure/adapters/out/memory/InMemoryPracticeOfferRepository.js';
 import type { InstitutionalProgramCatalog } from '../../src/contexts/targeting/domain/ports/out/ProgramCatalogPort.js';
@@ -133,7 +137,17 @@ export function buildPracticesHarness(
     clock
   });
 
-  const publish = new PublishPracticeOffer({ publishConvocatoria, offers, catalog: PRACTICES_CATALOG, clock });
+  const source = new CompositePracticeConvocatoriaSource({ registry, classifications, targeting: targetingRepo, offers });
+  const duplicateRules = loadPracticeListingPolicy();
+  const publish = new PublishPracticeOffer({
+    publishConvocatoria,
+    editConvocatoria,
+    offers,
+    source,
+    duplicateRules,
+    catalog: PRACTICES_CATALOG,
+    clock
+  });
 
   return {
     registry,
@@ -156,6 +170,9 @@ export function buildPracticesHarness(
     edit: new EditPracticeOffer({ editConvocatoria, offers, catalog: PRACTICES_CATALOG, clock }),
     withdraw: new WithdrawPracticeOffer({ withdrawConvocatoria, offers, clock }),
     withdrawConvocatoria,
+    /** HU-22: listado y detalle de la oferta consolidada. */
+    list: new ListPracticeOffers({ source, catalog: PRACTICES_CATALOG, clock }),
+    detail: new GetPracticeOfferDetail({ source, clock }),
     /** Ids del feed que ve un estudiante del programa dado. */
     async feedFor(programId: string) {
       return (await feed.execute({ program: programId })).feed.map((entry) => entry.record.representativeMessageId);

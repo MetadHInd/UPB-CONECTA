@@ -8,6 +8,10 @@ export class InMemoryNotificationPreferencesRepository implements NotificationPr
     return this.byStudent.get(studentId) ?? null;
   }
 
+  async delete(studentId: string): Promise<boolean> {
+    return this.byStudent.delete(studentId);
+  }
+
   async save(preferences: NotificationPreferences): Promise<void> {
     this.byStudent.set(preferences.studentId, preferences);
   }

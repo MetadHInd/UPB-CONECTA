@@ -1,5 +1,8 @@
 import { AuthenticateStudent } from '../../src/contexts/identity/application/AuthenticateStudent.js';
 import { LogoutSession } from '../../src/contexts/identity/application/LogoutSession.js';
+import { InvalidateDevice } from '../../src/contexts/notifications/application/InvalidateDevice.js';
+import { InMemoryDeviceRegistry } from '../../src/contexts/notifications/infrastructure/adapters/out/memory/InMemoryDeviceRegistry.js';
+import { NotificationsDeviceInvalidationAdapter } from '../../src/contexts/identity/infrastructure/adapters/out/device/NotificationsDeviceInvalidationAdapter.js';
 import { RefreshSession } from '../../src/contexts/identity/application/RefreshSession.js';
 import { SessionTokenIssuer } from '../../src/contexts/identity/application/SessionTokenIssuer.js';
 import { VerifyAccessToken } from '../../src/contexts/identity/application/VerifyAccessToken.js';
@@ -47,6 +50,11 @@ export function buildSessionHarness(
   const audit = new InMemorySecurityAuditLog();
   const policy = SessionPolicy.create(config);
   const provider = new InMemoryIdentityProviderAdapter();
+  const deviceRegistry = new InMemoryDeviceRegistry();
+  const devices = new NotificationsDeviceInvalidationAdapter(
+    deviceRegistry,
+    new InvalidateDevice({ registry: deviceRegistry, clock })
+  );
   const sessions = new SessionTokenIssuer({ signer, refreshTokens, clock, ids: new RandomSessionIdGenerator(), policy });
 
   return {
@@ -55,6 +63,7 @@ export function buildSessionHarness(
     signer,
     refreshTokens,
     audit,
+    deviceRegistry,
     policy,
     sessions,
     provider,
@@ -67,7 +76,7 @@ export function buildSessionHarness(
     }),
     refresh: new RefreshSession({ signer, refreshTokens, audit, clock, sessions }),
     verifyAccess: new VerifyAccessToken({ signer, refreshTokens, audit, clock }),
-    logout: new LogoutSession({ signer, refreshTokens, audit, clock })
+    logout: new LogoutSession({ signer, refreshTokens, audit, clock, devices })
   };
 }
 

@@ -28,6 +28,10 @@ export class InMemoryStudentProfileRepository implements StudentProfileRepositor
     return true;
   }
 
+  async delete(email: string): Promise<boolean> {
+    return this.profiles.delete(email);
+  }
+
   async findAll(): Promise<readonly StudentProfile[]> {
     return [...this.profiles.values()];
   }

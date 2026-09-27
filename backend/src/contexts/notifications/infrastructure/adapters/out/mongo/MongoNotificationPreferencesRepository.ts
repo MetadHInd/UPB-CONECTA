@@ -51,4 +51,9 @@ export class MongoNotificationPreferencesRepository implements NotificationPrefe
       { upsert: true }
     );
   }
+
+  async delete(studentId: string): Promise<boolean> {
+    const result = await this.collection.deleteOne({ _id: studentId });
+    return result.deletedCount === 1;
+  }
 }

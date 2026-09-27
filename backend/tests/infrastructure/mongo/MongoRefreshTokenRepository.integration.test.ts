@@ -129,4 +129,16 @@ describe('MongoRefreshTokenRepository (integración contra MongoDB real)', () =>
     const statuses = await db.collection(TOKENS).find({ chainId: r1.sessionId }).map((d) => d['status']).toArray();
     expect(statuses).toEqual(['revoked', 'revoked', 'revoked', 'revoked']);
   });
+
+  it('HU-48: encuentra las cadenas vivas de un titular y omite las revocadas y las de otros', async () => {
+    await repository.register(record('t1', 'c1'));
+    await repository.register(record('t2', 'c1', { status: 'used', usedAt: T0 }));
+    await repository.register(record('t3', 'c2'));
+    await repository.register(record('t4', 'c3', { subject: 'otro@upb.edu.co' }));
+    await repository.revokeChain('c2', 'logout', T0);
+
+    const chains = await repository.findLiveChainIdsBySubject('estudiante@upb.edu.co');
+
+    expect([...chains].sort()).toEqual(['c1']);
+  });
 });

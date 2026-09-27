@@ -25,4 +25,10 @@ export interface RefreshTokenRepositoryPort {
   revokeChain(chainId: string, reason: RefreshTokenRevocationReason, at: Date): Promise<void>;
 
   isChainRevoked(chainId: string): Promise<boolean>;
+
+  /**
+   * HU-48: cadenas del titular con algun token todavia no revocado, para invalidar todas sus
+   * sesiones al suprimir sus datos. `subject` = correo institucional normalizado.
+   */
+  findLiveChainIdsBySubject(subject: string): Promise<readonly string[]>;
 }

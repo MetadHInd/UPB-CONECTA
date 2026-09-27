@@ -52,6 +52,10 @@ class InterruptingConsolidatedMessageRegistry implements ConsolidatedMessageRegi
     return this.inner.findByRepresentativeMessageId(messageId);
   }
 
+  findByRepresentativeMessageIds(messageIds: readonly string[]) {
+    return this.inner.findByRepresentativeMessageIds(messageIds);
+  }
+
   async save(record: ConsolidatedMessageRecord): Promise<void> {
     this.saveCalls += 1;
     if (this.saveCalls === this.failOnCallNumber) {
