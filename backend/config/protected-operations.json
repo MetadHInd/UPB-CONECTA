@@ -1,6 +1,9 @@
 {
   "operations": [
     { "operation": "ManageTopics", "requiredRole": "content-admin" },
+    { "operation": "GetModerationHistory", "requiredRole": "content-admin" },
+    { "operation": "RevokeSanction", "requiredRole": "content-admin" },
+    { "operation": "ManageSanctionThresholds", "requiredRole": "content-admin" },
     { "operation": "CorrectClassification", "requiredRole": "content-admin" },
     { "operation": "PublishConvocatoria", "requiredRole": "content-admin" },
     { "operation": "WithdrawConvocatoria", "requiredRole": "content-admin" },

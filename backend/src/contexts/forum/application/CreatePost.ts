@@ -9,6 +9,7 @@ import {
   type PostView
 } from '../domain/entities/Post.js';
 import { ForumAccessPolicy } from '../domain/services/ForumAccessPolicy.js';
+import { formatSanctionEnd } from '../domain/services/SanctionMessages.js';
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
 import type { ForumAccessAuditPort } from '../domain/ports/out/ForumAccessAuditPort.js';
 import type { ForumAuthorRepositoryPort } from '../domain/ports/out/ForumAuthorRepositoryPort.js';
@@ -44,12 +45,6 @@ export type CreatePostResult =
       readonly fields?: readonly string[];
       readonly sanctionEndsAt?: Date;
     };
-
-const SANCTION_DATE_FORMAT = new Intl.DateTimeFormat('es-CO', {
-  dateStyle: 'long',
-  timeStyle: 'short',
-  timeZone: 'America/Bogota'
-});
 
 /**
  * Publicar en el foro (HU-30; CU-03 pasos 1 y 2, excepcion E2). La autoria
@@ -122,7 +117,7 @@ export class CreatePost {
         case 'sanctioned':
           return reject(
             PostRejectionKind.SANCTIONED,
-            `Tienes una sanción activa en el foro hasta el ${SANCTION_DATE_FORMAT.format(decision.sanctionEndsAt)} (hora de Colombia).`,
+            `Tienes una sanción activa en el foro hasta el ${formatSanctionEnd(decision.sanctionEndsAt)}.`,
             { sanctionEndsAt: decision.sanctionEndsAt }
           );
       }

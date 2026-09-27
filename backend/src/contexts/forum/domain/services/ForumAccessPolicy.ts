@@ -1,7 +1,7 @@
 import type { FacultyProgramResolver } from '../../../targeting/domain/services/FacultyProgramResolver.js';
 import { targetingIncludesProgram } from '../../../targeting/domain/services/ProgramTargetingMembership.js';
 import { isVerifiedAuthor, type ForumAuthor } from '../entities/ForumAuthor.js';
-import { isSanctionActive, type Sanction } from '../entities/Sanction.js';
+import { activeSanctionEnd, type Sanction } from '../entities/Sanction.js';
 import type { Topic } from '../entities/Topic.js';
 
 export type TopicAccessDecision =
@@ -47,11 +47,8 @@ export class ForumAccessPolicy {
     const access = this.checkTopicAccess(input.topic, input.author);
     if (!access.allowed) return access;
 
-    const active = input.sanctions.filter((sanction) => isSanctionActive(sanction, input.now));
-    if (active.length > 0) {
-      const sanctionEndsAt = new Date(Math.max(...active.map((sanction) => sanction.endsAt.getTime())));
-      return { allowed: false, reason: 'sanctioned', sanctionEndsAt };
-    }
+    const sanctionEndsAt = activeSanctionEnd(input.sanctions, input.now);
+    if (sanctionEndsAt !== null) return { allowed: false, reason: 'sanctioned', sanctionEndsAt };
     return { allowed: true };
   }
 }

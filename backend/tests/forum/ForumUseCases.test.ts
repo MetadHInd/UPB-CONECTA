@@ -430,7 +430,7 @@ describe('HU-30 — foro con identidad verificada y temas administrables (RF-46,
     it('rechaza la publicación e informa la fecha en que termina la sanción', async () => {
       const forum = await withSeededForum();
       await forum.login('ana');
-      forum.sanctions.impose('ana@upb.edu.co', { startsAt: new Date('2026-09-20T00:00:00Z'), endsAt: new Date('2026-09-30T22:00:00Z') });
+      await forum.imposeSanction('ana@upb.edu.co', { startsAt: new Date('2026-09-20T00:00:00Z'), endsAt: new Date('2026-09-30T22:00:00Z') });
 
       const result = await forum.createPost.execute({ authorEmail: 'ana@upb.edu.co', topicId: 'general', body: body() });
 
@@ -447,7 +447,7 @@ describe('HU-30 — foro con identidad verificada y temas administrables (RF-46,
     it('al terminar la sanción vuelve a poder publicar', async () => {
       const forum = await withSeededForum();
       await forum.login('ana');
-      forum.sanctions.impose('ana@upb.edu.co', { startsAt: new Date('2026-09-20T00:00:00Z'), endsAt: new Date('2026-09-22T14:00:00Z') });
+      await forum.imposeSanction('ana@upb.edu.co', { startsAt: new Date('2026-09-20T00:00:00Z'), endsAt: new Date('2026-09-22T14:00:00Z') });
 
       expect((await forum.createPost.execute({ authorEmail: 'ana@upb.edu.co', topicId: 'general', body: body() })).ok).toBe(false);
       forum.advanceHours(2);
@@ -457,7 +457,7 @@ describe('HU-30 — foro con identidad verificada y temas administrables (RF-46,
     it('la sanción impide publicar pero no leer', async () => {
       const forum = await withSeededForum();
       await forum.login('ana');
-      forum.sanctions.impose('ana@upb.edu.co', { startsAt: new Date('2026-09-20T00:00:00Z'), endsAt: new Date('2026-09-30T00:00:00Z') });
+      await forum.imposeSanction('ana@upb.edu.co', { startsAt: new Date('2026-09-20T00:00:00Z'), endsAt: new Date('2026-09-30T00:00:00Z') });
 
       expect((await forum.listPosts.execute({ viewerEmail: 'ana@upb.edu.co', topicId: 'general' })).ok).toBe(true);
     });
