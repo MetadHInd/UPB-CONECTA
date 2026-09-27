@@ -379,6 +379,16 @@ No se reutilizó `AuthorizationAuditLogPort` de `identity` (HU-46): ese log est�
 | — | Dominio desacoplado de infraestructura | `npm run check:architecture` |
 | — | Operaciones declaradas en el catálogo de roles | `npm run check:authorization` |
 
+## HU-24 — Edición de convocatorias (`EditConvocatoria`)
+
+HU-24 (carga manual de ofertas de práctica, contexto `practices`) necesitaba editar una convocatoria ya publicada sin abrir una ruta de escritura alterna. Se agregó `EditConvocatoria` junto a `PublishConvocatoria` y `WithdrawConvocatoria`:
+- edita el cuerpo, la fecha de cierre, el enlace de postulación y la segmentación;
+- no edita el remitente, el asunto ni la fecha del primer envío, porque forman `ConvocatoriaId`;
+- rechaza una convocatoria retirada;
+- audita con el evento nuevo `ConvocatoriaAuditEventKind.EDITED` y `changedFields`, que puede incluir campos de una extensión (`extensionChanges`, por ejemplo los requisitos de una práctica).
+
+Los avisos de vencimiento se recalculan sin invalidación explícita, porque el planificador de HU-19 relee fecha y segmentación en cada ciclo. Detalle en el [README de `practices`](../practices/README.md).
+
 ## HU-53 — Verificación del aislamiento del dominio (RNF-41, RNF-42)
 
 Esta historia exige que el aislamiento del dominio sea demostrable mediante

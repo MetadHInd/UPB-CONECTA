@@ -49,7 +49,7 @@ El resto del backlog (12 épicas, 57 historias de usuario, ver la Especificació
 | T-01 | Desbloqueo de las dependencias institucionales externas (buzón y directorio) |
 | T-02 | Modelo de datos documental, repositorios e índices base |
 
-`src/contexts/consent/`, `src/contexts/notifications/`, `src/contexts/personalization/` y `src/contexts/metrics/` (HU-51, tablero de métricas de operación) son algunos de los contextos fuera de `ingestion` — mismo patrón hexagonal, ver el README propio de cada uno; el árbol completo de contextos hoy incluye además `classification`, `identity`, `consent`, `forum`, `targeting`, `hardening`, `moderation`, `feed` y `profile`, cada uno con su propio README.
+`src/contexts/consent/`, `src/contexts/notifications/`, `src/contexts/personalization/` y `src/contexts/metrics/` (HU-51, tablero de métricas de operación) son algunos de los contextos fuera de `ingestion` — mismo patrón hexagonal, ver el README propio de cada uno; el árbol completo de contextos hoy incluye además `classification`, `identity`, `consent`, `forum`, `targeting`, `hardening`, `moderation`, `feed`, `profile` y `practices` (HU-24), cada uno con su propio README.
 
 ## Arquitectura
 
