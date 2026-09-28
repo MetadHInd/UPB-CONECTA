@@ -7,21 +7,26 @@ import { normalizeForMatching } from './TextNormalization.js';
  * expresión. Una entrada vacía se ignora (bloquearía todo el foro).
  */
 export class BannedTermsDictionary {
-  private readonly patterns: readonly RegExp[];
+  private readonly entries: readonly { readonly term: string; readonly pattern: RegExp }[];
 
   constructor(terms: readonly string[]) {
-    this.patterns = terms
-      .map((term) => normalizeForMatching(term).trim())
-      .filter((term) => term !== '')
-      .map((term) => {
-        const body = term.split(/\s+/).map(escapeRegExp).join('\\s+');
-        return new RegExp(`(?<![\\p{L}\\p{N}])${body}(?![\\p{L}\\p{N}])`, 'u');
+    this.entries = terms
+      .map((term) => ({ term, normalized: normalizeForMatching(term).trim() }))
+      .filter(({ normalized }) => normalized !== '')
+      .map(({ term, normalized }) => {
+        const body = normalized.split(/\s+/).map(escapeRegExp).join('\\s+');
+        return { term, pattern: new RegExp(`(?<![\\p{L}\\p{N}])${body}(?![\\p{L}\\p{N}])`, 'u') };
       });
   }
 
   matches(text: string): boolean {
+    return this.findMatches(text).length > 0;
+  }
+
+  /** Las expresiones del diccionario que aparecen en el texto, tal como están escritas en él (HU-52 criterio 4). */
+  findMatches(text: string): string[] {
     const normalized = normalizeForMatching(text);
-    return this.patterns.some((pattern) => pattern.test(normalized));
+    return this.entries.filter(({ pattern }) => pattern.test(normalized)).map(({ term }) => term);
   }
 }
 
