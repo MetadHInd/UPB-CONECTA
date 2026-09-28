@@ -1,6 +1,7 @@
 import { approvedFeedback } from '../domain/services/AuthorFeedbackPolicy.js';
 import type { AuthorFeedbackNotificationPort } from '../domain/ports/out/AuthorFeedbackNotificationPort.js';
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
+import type { AutomaticModerationRecordPort } from '../domain/ports/out/AutomaticModerationRecordPort.js';
 import type { ContentModerationLogPort } from '../domain/ports/out/ContentModerationLogPort.js';
 import type { HeldContentPublisherPort } from '../domain/ports/out/HeldContentPublisherPort.js';
 import type { RetainedContentQueuePort } from '../domain/ports/out/RetainedContentQueuePort.js';
@@ -20,6 +21,8 @@ export interface ApproveRetainedContentDependencies {
   readonly notifications: AuthorFeedbackNotificationPort;
   readonly publisher: HeldContentPublisherPort;
   readonly clock: ClockPort;
+  /** HU-52 criterio 5: la resolucion se anexa a la decision automatica, sin reescribirla. */
+  readonly records?: AutomaticModerationRecordPort;
 }
 
 /**
@@ -57,6 +60,12 @@ export class ApproveRetainedContent {
       source: 'human-review',
       internalDetail: null,
       occurredAt: now
+    });
+    await this.deps.records?.appendResolution(review.contentId, {
+      outcome: 'approved',
+      reviewer,
+      category: review.category,
+      resolvedAt: now
     });
 
     const feedback = approvedFeedback(review.contentId);

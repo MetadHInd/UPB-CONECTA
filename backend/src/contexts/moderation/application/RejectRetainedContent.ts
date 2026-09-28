@@ -1,6 +1,7 @@
 import { rejectedFeedback } from '../domain/services/AuthorFeedbackPolicy.js';
 import type { AuthorFeedbackNotificationPort } from '../domain/ports/out/AuthorFeedbackNotificationPort.js';
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
+import type { AutomaticModerationRecordPort } from '../domain/ports/out/AutomaticModerationRecordPort.js';
 import type { ContentModerationLogPort } from '../domain/ports/out/ContentModerationLogPort.js';
 import type { RetainedContentQueuePort } from '../domain/ports/out/RetainedContentQueuePort.js';
 import { findNormForCategory, type ModerationFeedbackConfig } from '../domain/value-objects/ModerationFeedbackConfig.js';
@@ -20,6 +21,8 @@ export interface RejectRetainedContentDependencies {
   readonly log: ContentModerationLogPort;
   readonly notifications: AuthorFeedbackNotificationPort;
   readonly clock: ClockPort;
+  /** HU-52 criterio 5: la resolucion se anexa a la decision automatica, sin reescribirla. */
+  readonly records?: AutomaticModerationRecordPort;
 }
 
 /**
@@ -59,6 +62,7 @@ export class RejectRetainedContent {
       internalDetail: null,
       occurredAt: now
     });
+    await this.deps.records?.appendResolution(review.contentId, { outcome: 'rejected', reviewer, category, resolvedAt: now });
 
     const feedback = rejectedFeedback(this.deps.config, review.contentId, category);
     await this.deps.notifications.notifyAuthor({

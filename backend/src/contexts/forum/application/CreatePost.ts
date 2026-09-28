@@ -154,7 +154,9 @@ export class CreatePost {
     const moderation = await this.dependencies.moderate.execute({
       title: content.title,
       text: content.text,
-      author: { name: author!.name, email: author!.email }
+      author: { name: author!.name, email: author!.email },
+      // HU-52: la decisión queda registrada contra este contenido, también si se publica.
+      content: { id: postId, kind: 'post' }
     });
     if (moderation.verdict !== ModerationVerdict.PUBLISH) {
       return this.holdBack(moderation, {

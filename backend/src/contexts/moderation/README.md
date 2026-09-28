@@ -1,4 +1,4 @@
-# Contexto de moderación (HU-49)
+# Contexto de moderación (HU-49, HU-31, HU-32, HU-52)
 
 > Documentación específica de este contexto acotado. Para la visión general del proyecto y la arquitectura, ver el [README raíz](../../../README.md).
 
@@ -91,7 +91,7 @@ Trazabilidad: **RF-50, RF-51, RNF-05/11/19/32. CU-03.** Todo texto enviado al fo
 
 ## Configuración
 
-`config/moderation-policy.json`: `thresholds.lower/upper`, `timeoutMs` (2500) y `bannedTerms`. Los valores por defecto (0.4 / 0.8) son un punto de partida, no calibrados con datos reales.
+`config/moderation-policy.json`: `thresholds.lower/upper`, `timeoutMs` (2500) y `bannedTerms`. Los valores por defecto (0.4 / 0.8) son un punto de partida, no calibrados con datos reales. Desde HU-52 este archivo solo aporta los valores **iniciales**: umbrales y diccionario los ajusta el administrador (ver HU-52 más abajo); `timeoutMs` sigue siendo del archivo.
 
 ## Criterios y pruebas
 
@@ -176,3 +176,67 @@ Trazabilidad: RF-52, RNF-31, RNF-33. Contenido del foro (HU-30) que la moderaci�
 | 4 Aprobación humana publica e informa | `ResolveRetainedContent.test.ts` (`ApproveRetainedContent`) |
 | 5 Cola y plazo de 24 h | `HandleModerationDecision.test.ts` (`criterio 5`), `ResolveRetainedContent.test.ts` (cola, límite exacto, escalado), `ModerationFeedbackConfig.test.ts` |
 | 6 Fragmento y categoría conservados | `HandleModerationDecision.test.ts` (`criterio 6`), `ResolveRetainedContent.test.ts`, `MongoModerationFeedback.integration.test.ts` |
+
+## HU-52 (SCRUM-64): gestión de reglas de moderación y auditoría completa de las decisiones
+
+Trazabilidad: RF-77, RF-78, RNF-18, RNF-32, RNF-33. CU-03 paso 7. Como en HU-31 y HU-32, no hay capa HTTP ni panel: se entregan los casos de uso que el panel de moderación invocará.
+
+### Piezas
+
+| Pieza | Capa | Rol |
+|---|---|---|
+| `ModerationRules`, `sameBannedTerm` | Dominio | Umbrales y diccionario vigentes; dos expresiones son la misma sin distinguir mayúsculas, tildes ni espacios |
+| `ModerationRulesRepositoryPort` + memoria/Mongo (`moderation_rules`) | Puerto / infraestructura | Reglas vigentes, un documento; sin documento rigen las de `config/moderation-policy.json` |
+| `ModerationRulesAuditPort` + memoria/Mongo (`moderation_rules_audit`) | Puerto / infraestructura | Auditoría append-only de cada cambio de reglas |
+| `ManageModerationRules` | Aplicación | Ajustar umbrales, agregar y retirar expresiones, consultar reglas e historial (criterios 1 a 3) |
+| `AutomaticModerationRecord` + `AutomaticModerationRecordPort` + memoria/Mongo (`moderation_automatic_decisions`) | Dominio / infraestructura | Registro de cada decisión automática, con resoluciones humanas anexas (criterios 4 y 5) |
+| `ScreenContent` (ampliado) | Aplicación | Lee las reglas en cada evaluación y registra cada decisión |
+| `ApproveRetainedContent` / `RejectRetainedContent` (ampliados) | Aplicación | Anexan la resolución humana al registro (criterio 5) |
+| `GetModerationDecisionRecord` | Aplicación | Registro completo de un contenido y los fundamentos de la infracción (criterio 6) |
+| `ThresholdSimulation` + `SimulateModerationThresholds` | Dominio / aplicación | Efecto de un umbral propuesto sobre el conjunto etiquetado (criterio 7) |
+| `ModerationLabeledSampleRepositoryPort` + memoria/Mongo (`moderation_labeled_samples`) | Puerto / infraestructura | Conjunto de prueba etiquetado |
+| `scoreWithin` | Aplicación | Consulta al modelo con plazo, compartida por la moderación real y la simulación |
+
+### Decisiones
+
+1. **Reglas leídas en cada evaluación (criterios 1 y 2).** `ScreenContent` pide las reglas a `ModerationRulesRepositoryPort` cada vez, así que un ajuste aplica a la siguiente publicación sin redespliegue. No reevalúa lo ya decidido: cada decisión quedó registrada con las reglas de su momento. El archivo de configuración pasa a ser el valor inicial.
+2. **Mismo patrón que los umbrales de sanción de HU-35.** Un documento vigente que se revalida al leerse (un documento editado a mano con umbrales incoherentes falla en vez de moderar mal) y una auditoría aparte, append-only.
+3. **Auditoría (criterio 3).** Cada cambio de umbral guarda el valor anterior, el nuevo, el administrador y la hora. Los cambios del diccionario también se auditan: retirar una expresión afloja la moderación tanto como subir un umbral. Un ajuste que no cambia nada no escribe ni audita. Una expresión repetida (sin distinguir mayúsculas ni tildes), vacía o de más de 80 caracteres se rechaza.
+4. **Se registra toda decisión automática, también publicar (criterio 4).** HU-32 solo registraba retener y bloquear, porque publicar no motiva un aviso al autor. El criterio 4 pide "cualquier decisión", así que el registro nuevo guarda también las publicaciones, con el texto evaluado (con el marcado neutralizado, HU-47), el puntaje (o `null` si el servicio no respondió), los umbrales y las expresiones del diccionario que coincidieron, el veredicto y el motivo. Si el registro falla, `CreatePost` falla y no se publica nada sin su registro.
+5. **Un registro aparte del de HU-32, no una ampliación.** El de HU-32 es una entrada por evento (retención, bloqueo, aprobación), con el fragmento y la categoría que ve el estudiante. El de HU-52 es uno por decisión automática, con el detalle técnico, al que se anexan las resoluciones. Se consultan juntos en `GetModerationDecisionRecord`.
+6. **La resolución humana se anexa (criterio 5).** `appendResolution` solo agrega al final de `resolutions` (en Mongo, `$push`, nunca `$set` sobre la parte automática). Aprobar y rechazar lo retenido la anexan con el revisor, la categoría y la hora.
+7. **Impugnación (criterio 6).** El administrador llega desde el historial del estudiante (HU-35, `GetModerationHistory`), que nombra cada contenido retenido o bloqueado, a `GetModerationDecisionRecord`: fragmento, categoría, norma de convivencia (`NC-xx`), expresiones del diccionario que coincidieron, quién decidió y cuándo. Si una persona aprobó lo retenido, no hay fundamentos de infracción.
+8. **Simulación (criterio 7).** Cada texto etiquetado se puntúa una sola vez con el mismo modelo y plazo que la moderación real y se evalúa contra el diccionario vigente; los umbrales vigentes y los propuestos se aplican a esos mismos puntajes con la misma `ModerationDecisionPolicy`, así que la simulación no puede discrepar de la decisión real. Cobertura = ofensivos no publicados / ofensivos; falsos positivos = no ofensivos no publicados / no ofensivos ("no publicado" incluye lo retenido, que no llega al foro sin una persona). Se devuelve también el detalle por veredicto y la diferencia. No cambia ninguna regla.
+9. **El registro no guarda el correo del autor.** Se vincula por `contentId`; el autor está en el registro de HU-32 y en el historial de infracciones de HU-35.
+
+### Autorización (HU-46)
+
+`ManageModerationRules`, `SimulateModerationThresholds` y `GetModerationDecisionRecord` están en `config/protected-operations.json` con rol `content-admin`.
+
+### Colecciones MongoDB
+
+- `moderation_rules`: `_id = 'current'`, `{ lower, upper, bannedTerms, updatedBy, updatedAt }`.
+- `moderation_rules_audit`: append-only. Índice `idx_occurred_at` `{ occurredAt: -1 }`.
+- `moderation_automatic_decisions`: `_id = kind:contentId:epochMs`. Índice `idx_content_decided` `{ contentId: 1, decidedAt: 1 }`.
+- `moderation_labeled_samples`: `_id = sampleId`.
+
+### Limitaciones explícitas
+
+- **El conjunto etiquetado lo construye HU-57** (piloto). Aquí solo existen el repositorio y la simulación; sin muestras, la simulación responde `no-labeled-samples`.
+- **Los puntajes de la simulación salen del stub** (`InMemoryModerationAdapter`) mientras no haya proveedor real de IA (HU-31).
+- **La categoría de infracción sigue siendo la general (`other`)** en las decisiones automáticas: la política no clasifica el tipo de infracción (HU-31). Una persona puede reclasificarla al rechazar.
+- **Una infracción retenida que se aprueba sigue como `retained` en el historial de HU-35** (no computa para sancionar). El registro de HU-52 sí conserva la aprobación.
+
+### Criterios de aceptación y pruebas
+
+| # | Criterio | Pruebas |
+|---|---|---|
+| 1 | Umbrales ajustables sin redespliegue | `tests/moderation/ModerationRulesAndAudit.test.ts` › criterio 1 (con el foro real); `tests/infrastructure/mongo/MongoModerationRules.integration.test.ts` |
+| 2 | Diccionario ajustable sin código | › criterio 2 |
+| 3 | Cambio de umbral auditado | › criterio 3; integración Mongo |
+| 4 | Cada decisión conserva texto, puntaje, umbral y decisión | › criterio 4 (publicar, retener, bloquear, sin puntaje, registro caído) |
+| 5 | Resolución humana anexada sin sobrescribir | › criterio 5; integración Mongo (`$push`) |
+| 6 | Fragmento y categoría ante una impugnación | › criterio 6 (desde el historial de HU-35) |
+| 7 | Simulación sobre el conjunto etiquetado | › criterio 7; integración Mongo |
+
+Mutaciones comprobadas: ignorar las reglas guardadas hace fallar 4 pruebas; no registrar las publicaciones, 2; registrar un umbral fijo, 1; no auditar, 2; auditar un ajuste sin cambios, 1; comparar expresiones sin normalizar, 1; sobrescribir la decisión al anexar, 2; mantener fundamentos tras una aprobación, 1; contar solo los bloqueos como cobertura, 1.

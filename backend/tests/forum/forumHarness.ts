@@ -42,6 +42,17 @@ import { ScreenContent } from '../../src/contexts/moderation/application/ScreenC
 import { ModerationThresholds } from '../../src/contexts/moderation/domain/value-objects/ModerationThresholds.js';
 import { InMemoryHeldContentStore } from '../../src/contexts/moderation/infrastructure/adapters/out/memory/InMemoryHeldContentStore.js';
 import { ScriptedModerationPort } from '../moderation/ScriptedModerationPort.js';
+import { ApproveRetainedContent } from '../../src/contexts/moderation/application/ApproveRetainedContent.js';
+import { GetModerationDecisionRecord } from '../../src/contexts/moderation/application/GetModerationDecisionRecord.js';
+import { ManageModerationRules } from '../../src/contexts/moderation/application/ManageModerationRules.js';
+import { RejectRetainedContent } from '../../src/contexts/moderation/application/RejectRetainedContent.js';
+import type { AutomaticModerationRecordPort } from '../../src/contexts/moderation/domain/ports/out/AutomaticModerationRecordPort.js';
+import type { ModerationRulesAuditPort } from '../../src/contexts/moderation/domain/ports/out/ModerationRulesAuditPort.js';
+import type { ModerationRulesRepositoryPort } from '../../src/contexts/moderation/domain/ports/out/ModerationRulesRepositoryPort.js';
+import { InMemoryAutomaticModerationRecords } from '../../src/contexts/moderation/infrastructure/adapters/out/memory/InMemoryAutomaticModerationRecords.js';
+import { InMemoryModerationRulesAudit } from '../../src/contexts/moderation/infrastructure/adapters/out/memory/InMemoryModerationRulesAudit.js';
+import { InMemoryModerationRulesRepository } from '../../src/contexts/moderation/infrastructure/adapters/out/memory/InMemoryModerationRulesRepository.js';
+import { ForumHeldContentPublisher } from '../../src/contexts/forum/infrastructure/integration/ForumHeldContentPublisher.js';
 
 export const FORUM_CATALOG: InstitutionalProgramCatalog = {
   faculties: [
@@ -76,6 +87,9 @@ export function buildForumHarness(
     readonly sanctions?: SanctionRepositoryPort;
     readonly thresholds?: SanctionThresholdsRepositoryPort;
     readonly retainedQueue?: HeldContentStorePort;
+    readonly moderationRules?: ModerationRulesRepositoryPort;
+    readonly moderationRulesAudit?: ModerationRulesAuditPort;
+    readonly moderationRecords?: AutomaticModerationRecordPort;
   } = {}
 ) {
   let now = new Date('2026-09-22T12:00:00Z');
@@ -93,9 +107,16 @@ export function buildForumHarness(
   // HU-31: por defecto el servicio de moderación responde un puntaje limpio; cada prueba lo cambia con `moderationPort.script`.
   const moderationPort = new ScriptedModerationPort({ score: 0.05 });
   const reviewQueue = options.retainedQueue ?? new InMemoryHeldContentStore();
+  const initialPolicy = { thresholds: ModerationThresholds.of(0.4, 0.8), bannedTerms: ['idiota', 'hijo de puta'], timeoutMs: 100 };
+  // HU-52: reglas ajustables por el administrador y registro de cada decisión automática.
+  const moderationRules = options.moderationRules ?? new InMemoryModerationRulesRepository(initialPolicy);
+  const moderationRulesAudit = options.moderationRulesAudit ?? new InMemoryModerationRulesAudit();
+  const moderationRecords = options.moderationRecords ?? new InMemoryAutomaticModerationRecords();
   const moderate = new ScreenContent({
     moderation: moderationPort,
-    policy: { thresholds: ModerationThresholds.of(0.4, 0.8), bannedTerms: ['idiota', 'hijo de puta'], timeoutMs: 100 }
+    policy: initialPolicy,
+    rules: moderationRules,
+    recording: { records: moderationRecords, clock }
   });
   const faculties = new FacultyProgramResolver(FORUM_CATALOG);
   const syncAuthor = new SyncForumAuthor({ authors, clock, programs: new ProgramCatalogMatcher(FORUM_CATALOG) });
@@ -109,11 +130,12 @@ export function buildForumHarness(
   const retentionQueue = new InMemoryRetainedContentQueue();
   const moderationLog = new InMemoryContentModerationLog();
   const authorNotices = new InMemoryAuthorFeedbackNotices();
+  const feedbackConfig = parseModerationFeedbackConfig({
+    resolutionDeadlineHours: 24,
+    norms: [{ category: 'other', code: 'NC-07', title: 'Convivencia general', text: 'El contenido incumple las normas generales de convivencia.' }]
+  });
   const decisions = new HandleModerationDecision({
-    config: parseModerationFeedbackConfig({
-      resolutionDeadlineHours: 24,
-      norms: [{ category: 'other', code: 'NC-07', title: 'Convivencia general', text: 'El contenido incumple las normas generales de convivencia.' }]
-    }),
+    config: feedbackConfig,
     queue: retentionQueue,
     log: moderationLog,
     notifications: authorNotices,
@@ -123,6 +145,9 @@ export function buildForumHarness(
 
   return {
     moderationPort,
+    moderationRules,
+    moderationRulesAudit,
+    moderationRecords,
     reviewQueue,
     decisions,
     moderationLog,
@@ -174,6 +199,26 @@ export function buildForumHarness(
     recordInfraction,
     history: new GetModerationHistory({ infractions, sanctions, thresholds, clock }),
     revokeSanction: new RevokeSanction({ sanctions, notifications, audit: sanctionAudit, clock }),
-    manageThresholds: new ManageSanctionThresholds({ thresholds, audit: sanctionAudit, clock })
+    manageThresholds: new ManageSanctionThresholds({ thresholds, audit: sanctionAudit, clock }),
+    /** HU-52: reglas de moderación, registro de decisiones y revisión humana que anexa su resolución. */
+    manageModerationRules: new ManageModerationRules({ rules: moderationRules, audit: moderationRulesAudit, clock }),
+    decisionRecord: new GetModerationDecisionRecord({ records: moderationRecords, log: moderationLog, config: feedbackConfig }),
+    approveRetained: new ApproveRetainedContent({
+      config: feedbackConfig,
+      queue: retentionQueue,
+      log: moderationLog,
+      notifications: authorNotices,
+      publisher: new ForumHeldContentPublisher({ held: reviewQueue, posts, clock }),
+      clock,
+      records: moderationRecords
+    }),
+    rejectRetained: new RejectRetainedContent({
+      config: feedbackConfig,
+      queue: retentionQueue,
+      log: moderationLog,
+      notifications: authorNotices,
+      clock,
+      records: moderationRecords
+    })
   };
 }

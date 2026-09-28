@@ -25,6 +25,9 @@
     { "operation": "GetReportAbuseFlags", "requiredRole": "content-admin" },
     { "operation": "GetRetainedContentQueue", "requiredRole": "content-admin" },
     { "operation": "ApproveRetainedContent", "requiredRole": "content-admin" },
-    { "operation": "RejectRetainedContent", "requiredRole": "content-admin" }
+    { "operation": "RejectRetainedContent", "requiredRole": "content-admin" },
+    { "operation": "ManageModerationRules", "requiredRole": "content-admin" },
+    { "operation": "SimulateModerationThresholds", "requiredRole": "content-admin" },
+    { "operation": "GetModerationDecisionRecord", "requiredRole": "content-admin" }
   ]
 }
