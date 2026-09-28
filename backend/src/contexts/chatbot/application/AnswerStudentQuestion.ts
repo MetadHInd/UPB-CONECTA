@@ -1,9 +1,10 @@
-import type { ChatbotPort, ChatbotOutput } from '../domain/ports/out/ChatbotPort.js';
+import { maskPersonalData } from '../../hardening/domain/services/PersonalDataMasking.js';
+import { CHATBOT_RESPONSE_LANGUAGE, type ChatbotHistoryTurn, type ChatbotOutput, type ChatbotPort } from '../domain/ports/out/ChatbotPort.js';
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
 import type { ConvocatoriaReferencePort } from '../domain/ports/out/ConvocatoriaReferencePort.js';
 import type { EscalationLogPort, EscalationReason } from '../domain/ports/out/EscalationLogPort.js';
 import type { KnowledgeBasePort } from '../domain/ports/out/KnowledgeBasePort.js';
-import { isCurrentKnowledgeEntry } from '../domain/entities/KnowledgeEntry.js';
+import { isCurrentKnowledgeEntry, type KnowledgeEntry } from '../domain/entities/KnowledgeEntry.js';
 import { anchorResponse } from '../domain/services/AnchoringPolicy.js';
 import { detectOutOfScopeTopic } from '../domain/services/OutOfScopeDetector.js';
 import type { OfficialChannel, OutOfScopePolicyConfig } from '../domain/value-objects/ChatbotConfig.js';
@@ -23,6 +24,15 @@ export interface AnswerStudentQuestionDependencies {
 interface QuestionInput {
   readonly question: string;
   readonly studentId?: string | null;
+  /**
+   * HU-40: contexto de la conversación activa. `history` viaja al modelo para
+   * entender una pregunta de seguimiento; las entradas de `contextEntryIds`
+   * (las citadas antes) se suman a las recuperadas, si siguen vigentes.
+   */
+  readonly conversation?: {
+    readonly history: readonly ChatbotHistoryTurn[];
+    readonly contextEntryIds: readonly string[];
+  };
 }
 
 /**
@@ -54,15 +64,23 @@ export class AnswerStudentQuestion {
     }
 
     const now = this.deps.clock.now();
-    const entries = await this.deps.knowledgeBase.searchCurrent(question);
-    const current = entries.filter((entry) => isCurrentKnowledgeEntry(entry, now));
+    const current = await this.currentEntries(question, input.conversation?.contextEntryIds ?? [], now);
     if (current.length === 0) {
       return this.escalate(input, 'no-information', 'La base de conocimiento no tiene entradas vigentes para la pregunta.');
     }
 
     let output: ChatbotOutput;
     try {
-      output = await this.deps.chatbot.generate({ question, entries: current });
+      // HU-40 criterio 4: al proveedor no viaja ningún dato identificatorio, ni en la pregunta ni en el historial.
+      output = await this.deps.chatbot.generate({
+        question: maskPersonalData(question),
+        entries: current,
+        history: (input.conversation?.history ?? []).map((turn) => ({
+          question: maskPersonalData(turn.question),
+          answer: turn.answer
+        })),
+        responseLanguage: CHATBOT_RESPONSE_LANGUAGE
+      });
     } catch (error) {
       return this.escalate(input, 'provider-failure', error instanceof Error ? error.message : String(error));
     }
@@ -74,6 +92,19 @@ export class AnswerStudentQuestion {
     const anchored = anchorResponse(text, resolved);
     if (!anchored.ok) return this.escalate(input, 'unanchored-response', anchored.reason);
     return { kind: 'answered', text, sources: anchored.sources };
+  }
+
+  /** Recuperadas para la pregunta más las citadas antes en la conversación, vigentes y sin repetir. */
+  private async currentEntries(question: string, contextEntryIds: readonly string[], now: Date): Promise<KnowledgeEntry[]> {
+    const [found, context] = await Promise.all([
+      this.deps.knowledgeBase.searchCurrent(question),
+      Promise.all(contextEntryIds.map((id) => this.deps.knowledgeBase.findById(id)))
+    ]);
+    const byId = new Map<string, KnowledgeEntry>();
+    for (const entry of [...found, ...context]) {
+      if (entry !== null && isCurrentKnowledgeEntry(entry, now) && !byId.has(entry.id)) byId.set(entry.id, entry);
+    }
+    return [...byId.values()];
   }
 
   private async resolve(source: ProposedSource, now: Date): Promise<AnchoredSource | null> {

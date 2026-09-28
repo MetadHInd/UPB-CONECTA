@@ -278,3 +278,7 @@ Reutiliza HU-45 (cadena de refresh tokens, `LogoutSession`, `VerifyAccessToken`)
 
 - **Cliente Android (Room):** `Frontend/` solo usa datos simulados (`MockData.kt`) y no tiene base local ni cliente HTTP; no hay nada que purgar. Se implementó el puerto (`LocalDataPurgePort`) y dobles en memoria; el adaptador Room, la cola persistente y el disparo del reintento al recuperar conexión quedan para la historia del cliente (criterio 3 del lado móvil).
 - **Capa HTTP:** `RemoteSessionClosurePort` se prueba con `InProcessRemoteSessionClosure`; el cliente real llamará a `POST /session/logout`.
+
+## HU-40: descartar el contexto del chatbot al cerrar la sesión
+
+`LogoutSession` recibe un `SessionEndedPort` opcional y lo invoca con el `sessionId` (la cadena) después de revocarla. Lo implementa `ChatbotConversationSessionEndedAdapter`, que descarta la conversación del chatbot de esa sesión (`EndChatbotConversation`). Es idempotente, como el resto del cierre. Ver `src/contexts/chatbot/README.md`, sección HU-40.

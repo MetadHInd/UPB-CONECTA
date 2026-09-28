@@ -1,3 +1,4 @@
+import type { SessionEndedPort } from '../../src/contexts/identity/domain/ports/out/SessionEndedPort.js';
 import { AuthenticateStudent } from '../../src/contexts/identity/application/AuthenticateStudent.js';
 import { LogoutSession } from '../../src/contexts/identity/application/LogoutSession.js';
 import { InvalidateDevice } from '../../src/contexts/notifications/application/InvalidateDevice.js';
@@ -41,6 +42,7 @@ export function buildSessionHarness(
     readonly start?: Date;
     readonly profileSync?: AuthenticatedProfileSyncPort;
     readonly consentStatus?: ConsentStatusPort;
+    readonly sessionEnded?: SessionEndedPort;
   } = {}
 ) {
   const config = readSessionConfig({ SESSION_SIGNING_SECRET: TEST_SIGNING_SECRET, ...options.env });
@@ -76,7 +78,7 @@ export function buildSessionHarness(
     }),
     refresh: new RefreshSession({ signer, refreshTokens, audit, clock, sessions }),
     verifyAccess: new VerifyAccessToken({ signer, refreshTokens, audit, clock }),
-    logout: new LogoutSession({ signer, refreshTokens, audit, clock, devices })
+    logout: new LogoutSession({ signer, refreshTokens, audit, clock, devices, ...(options.sessionEnded ? { sessionEnded: options.sessionEnded } : {}) })
   };
 }
 
