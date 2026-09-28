@@ -17,7 +17,12 @@ import type { StudentDirectoryEntry } from '../../src/contexts/notifications/dom
 import { AnticipationThreshold } from '../../src/contexts/notifications/domain/value-objects/AnticipationThreshold.js';
 import { InMemoryEmittedReminderRegistry } from '../../src/contexts/notifications/infrastructure/adapters/out/memory/InMemoryEmittedReminderRegistry.js';
 import { InMemoryNotificationPreferencesRepository } from '../../src/contexts/notifications/infrastructure/adapters/out/memory/InMemoryNotificationPreferencesRepository.js';
+import { PracticeTrackingFollowersAdapter } from '../../src/contexts/notifications/infrastructure/adapters/out/practices/PracticeTrackingFollowersAdapter.js';
 import { EditPracticeOffer } from '../../src/contexts/practices/application/EditPracticeOffer.js';
+import { GetPracticeApplicationTracking } from '../../src/contexts/practices/application/GetPracticeApplicationTracking.js';
+import { TrackPracticeApplication } from '../../src/contexts/practices/application/TrackPracticeApplication.js';
+import type { PracticeApplicationTrackingRepositoryPort } from '../../src/contexts/practices/domain/ports/out/PracticeApplicationTrackingRepositoryPort.js';
+import { InMemoryPracticeApplicationTrackingRepository } from '../../src/contexts/practices/infrastructure/adapters/out/memory/InMemoryPracticeApplicationTrackingRepository.js';
 import { PublishPracticeOffer } from '../../src/contexts/practices/application/PublishPracticeOffer.js';
 import { WithdrawPracticeOffer } from '../../src/contexts/practices/application/WithdrawPracticeOffer.js';
 import { GetPracticeOfferDetail } from '../../src/contexts/practices/application/GetPracticeOfferDetail.js';
@@ -78,6 +83,7 @@ export function buildPracticesHarness(
     readonly targetingRepo?: ProgramTargetingRepositoryPort;
     readonly auditLog?: ConvocatoriaAuditLogPort;
     readonly offers?: PracticeOfferRepositoryPort;
+    readonly trackings?: PracticeApplicationTrackingRepositoryPort;
   } = {}
 ) {
   let now = T0;
@@ -87,6 +93,8 @@ export function buildPracticesHarness(
   const targetingRepo = options.targetingRepo ?? new InMemoryProgramTargetingRepository();
   const auditLog = options.auditLog ?? new InMemoryConvocatoriaAuditLog();
   const offers = options.offers ?? new InMemoryPracticeOfferRepository();
+  const trackings = options.trackings ?? new InMemoryPracticeApplicationTrackingRepository();
+  const preferences = new InMemoryNotificationPreferencesRepository();
   const scheduling = new InMemoryNotificationSchedulingPort();
   const faculties = new FacultyProgramResolver(PRACTICES_CATALOG);
 
@@ -131,10 +139,11 @@ export function buildPracticesHarness(
     programTargetingRepo: targetingRepo,
     facultyResolver: faculties,
     studentDirectory: { findAll: async () => STUDENTS },
-    preferencesRepo: new InMemoryNotificationPreferencesRepository(),
+    preferencesRepo: preferences,
     emittedReminders: new InMemoryEmittedReminderRegistry(),
     systemThresholds: [AnticipationThreshold.ofMinutes(24 * 60)],
-    clock
+    clock,
+    followers: new PracticeTrackingFollowersAdapter(trackings)
   });
 
   const source = new CompositePracticeConvocatoriaSource({ registry, classifications, targeting: targetingRepo, offers });
@@ -155,6 +164,8 @@ export function buildPracticesHarness(
     targetingRepo,
     auditLog,
     offers,
+    trackings,
+    preferences,
     scheduling,
     now: () => now,
     setNow(date: Date) {
@@ -173,6 +184,9 @@ export function buildPracticesHarness(
     /** HU-22: listado y detalle de la oferta consolidada. */
     list: new ListPracticeOffers({ source, catalog: PRACTICES_CATALOG, clock }),
     detail: new GetPracticeOfferDetail({ source, clock }),
+    /** HU-23: seguimiento personal de postulaciones. */
+    track: new TrackPracticeApplication({ trackings, source, clock }),
+    tracking: new GetPracticeApplicationTracking({ trackings, source, clock }),
     /** Ids del feed que ve un estudiante del programa dado. */
     async feedFor(programId: string) {
       return (await feed.execute({ program: programId })).feed.map((entry) => entry.record.representativeMessageId);

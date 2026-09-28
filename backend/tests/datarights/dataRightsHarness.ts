@@ -25,6 +25,7 @@ import { InfractionOutcome } from '../../src/contexts/forum/domain/entities/Infr
 import { InMemoryDeviceRegistry } from '../../src/contexts/notifications/infrastructure/adapters/out/memory/InMemoryDeviceRegistry.js';
 import { InMemoryNotificationPreferencesRepository } from '../../src/contexts/notifications/infrastructure/adapters/out/memory/InMemoryNotificationPreferencesRepository.js';
 import { InMemoryPersonalStateRepository } from '../../src/contexts/personalization/infrastructure/adapters/out/memory/InMemoryPersonalStateRepository.js';
+import { InMemoryPracticeApplicationTrackingRepository } from '../../src/contexts/practices/infrastructure/adapters/out/memory/InMemoryPracticeApplicationTrackingRepository.js';
 import { UpdateStudentProfile } from '../../src/contexts/profile/application/UpdateStudentProfile.js';
 import { StudentProfile } from '../../src/contexts/profile/domain/entities/StudentProfile.js';
 import { createSemesterBounds } from '../../src/contexts/profile/domain/value-objects/SemesterNumber.js';
@@ -67,6 +68,7 @@ export function buildDataRightsHarness(options: { readonly flaky?: 'devices' | '
   const profiles = new InMemoryStudentProfileRepository();
   const preferences = new InMemoryNotificationPreferencesRepository();
   const states = new InMemoryPersonalStateRepository();
+  const practiceTrackings = new InMemoryPracticeApplicationTrackingRepository();
   const devices = new InMemoryDeviceRegistry();
   const requests = new InMemoryErasureRequestRepository();
   const rectifications = new InMemoryRectificationLog();
@@ -78,7 +80,7 @@ export function buildDataRightsHarness(options: { readonly flaky?: 'devices' | '
     profile: new ProfileDataSource(profiles),
     preferences: new PreferencesDataSource(preferences),
     publications: new PublicationsDataSource(forum.posts, forum.authors),
-    applicationTracking: new ApplicationTrackingDataSource(states),
+    applicationTracking: new ApplicationTrackingDataSource(states, practiceTrackings),
     devices: new DevicesDataSource(devices)
   };
   const flaky = options.flaky === undefined ? null : new FlakySource(baseSources[options.flaky]);
@@ -99,6 +101,7 @@ export function buildDataRightsHarness(options: { readonly flaky?: 'devices' | '
     profiles,
     preferences,
     states,
+    practiceTrackings,
     devices,
     refreshTokens,
     requests,

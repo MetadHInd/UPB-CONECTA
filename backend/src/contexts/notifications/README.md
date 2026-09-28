@@ -66,6 +66,8 @@ El planificador de avisos de vencimiento que HU-18, HU-38 y HU-21 llevaban docum
 - **`EmittedReminderRegistryPort`** (dominio, puerto propio) + `InMemoryEmittedReminderRegistry`/`MongoEmittedReminderRegistry` (infraestructura): el registro de idempotencia descrito arriba.
 - **`DueDateReminderConfig`** / **`DueDateReminderScheduler`**: intervalo del poller (`DUE_DATE_REMINDER_POLL_INTERVAL_MS`, por defecto 30s) y umbrales del sistema (`DUE_DATE_REMINDER_SYSTEM_THRESHOLDS_MINUTES`, por defecto 1 día) configurables sin redespliegue, mismo patrón que `NotificationBatchingConfig` (HU-21). El intervalo se valida contra el máximo de 60 segundos que exige el criterio 2: un valor mayor se rechaza al leer la configuración, no falla en silencio.
 
+**Ampliado por HU-23:** el público de un aviso de vencimiento es la segmentación **más** quienes siguen la convocatoria por su cuenta (una práctica marcada de interés o de postulación), vía `ConvocatoriaFollowersPort` (opcional; `PracticeTrackingFollowersAdapter` lee `practices`). Se resuelve en una consulta por ciclo y se une en un `Set`, así que quien está en ambos recibe un solo aviso por umbral. La preferencia de categoría aplica igual a los seguidores. Ver `src/contexts/practices/README.md`, sección HU-23.
+
 Wire-up en `src/main.ts`: `EmitDueDateReminders` corre en un `DueDateReminderScheduler` propio, en paralelo al `IngestionScheduler`, ambos detenidos en `SIGTERM`/`SIGINT`.
 
 ### HU-20 — Aviso de nueva convocatoria pertinente al programa del estudiante (RF-28, RF-61, RF-74)
