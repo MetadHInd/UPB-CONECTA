@@ -1,4 +1,4 @@
-# Contexto de prácticas (HU-24)
+# Contexto de prácticas (HU-22, HU-23, HU-24)
 
 > Documentación específica de este contexto acotado. Para la visión general del proyecto y la arquitectura, ver el [README raíz](../../../README.md).
 
@@ -140,8 +140,57 @@ Mutaciones comprobadas: publicar con otra categoría hace fallar 2 pruebas; no g
 | 4 | Cerrada distinguible y no mezclada | › criterio 4 |
 | 5 | Ingerida y luego cargada a mano, un solo registro | › criterio 5; `PracticeDuplicatePolicy.test.ts`; `MongoPracticeListing.integration.test.ts` |
 
+## HU-23 (SCRUM-35): seguimiento personal del estado de postulación y recordatorio de cierre
+
+**Trazabilidad:** RF-34, RF-35, RNF-20. Igual que HU-22 y HU-24, no hay servidor HTTP ni cliente móvil: se entregan los casos de uso que esa capa invocará.
+
+| Pieza | Capa | Rol |
+|---|---|---|
+| `PracticeApplicationTracking`, `PracticeApplicationStatus` | Dominio | Seguimiento privado estudiante-oferta, con historial de cambios |
+| `PracticeTrackingPolicy` | Dominio (servicio) | Validar el estado, situación de la oferta seguida, agrupar por estado |
+| `PracticeApplicationTrackingRepositoryPort` | Puerto | |
+| `TrackPracticeApplication` | Aplicación | Registrar o cambiar el estado (criterios 1 y 2) |
+| `GetPracticeApplicationTracking` | Aplicación | Vista agrupada por estado, con aviso de retiro (criterios 5 y 6) |
+| `InMemory`/`MongoPracticeApplicationTrackingRepository` | Infraestructura | Colección `practice_application_tracking` |
+| `ConvocatoriaFollowersPort` + `PracticeTrackingFollowersAdapter` | `notifications` | Suma a los seguidores al público del recordatorio de cierre (criterio 3) |
+
+### Decisiones
+
+1. **Entidad de relación, no campo de la oferta.** Igual que el estado personal de HU-16: el seguimiento vive en su propia colección por `studentId|offerId`. La oferta no sabe quién la sigue. `offerId` es el mismo del listado de HU-22 (`representativeMessageId`).
+2. **Estados.** `interesado`, `postulado`, `en-proceso` y `cerrado`. Cualquier otro valor se rechaza sin guardar nada. Los cambios son libres entre los cuatro: el estudiante lleva su propio registro y el sistema no le impone un orden.
+3. **Marca de tiempo e historial (criterio 2).** Cada cambio se agrega a `history` con su instante; `updatedAt` es el del último. Repetir el estado vigente no escribe nada.
+4. **Qué se puede seguir.** Empezar a seguir exige una práctica publicada y no retirada. Un seguimiento existente se puede actualizar aunque la oferta se haya retirado o cerrado, para darla por cerrada.
+5. **Recordatorio (criterio 3).** No hay un planificador nuevo: `EmitDueDateReminders` (HU-19) suma al público de la segmentación a quienes siguen la convocatoria como `interesado` o `postulado`, mediante `ConvocatoriaFollowersPort` (una consulta por ciclo). Hereda todo lo de HU-19: la anticipación elegida por el estudiante, el aviso inmediato si queda menos tiempo que el umbral, no avisar de una convocatoria retirada o vencida y la idempotencia. Quien está en la segmentación y además la sigue recibe un solo aviso por umbral. `en-proceso` y `cerrado` no piden recordatorio (`wantsClosingReminder`).
+6. **La categoría desactivada también silencia al seguidor.** Si el estudiante apagó los avisos de prácticas (HU-38), seguir una oferta no los reactiva. Es la misma regla de HU-19 criterio 5, sin excepción.
+7. **Privacidad (criterio 4, RNF-20).** El listado y el detalle de HU-22 no leen el seguimiento, y ningún caso de uso lo expone a terceros ni al administrador: no hay operación administrativa sobre él. La única lectura por oferta (`findTrackingStudents`) la usa el planificador de avisos. `studentId` sale de la sesión autenticada (HU-43), nunca del cuerpo de la petición. El seguimiento es dato personal: `ApplicationTrackingDataSource` (HU-48) lo incluye en la consulta y la supresión del titular.
+8. **Oferta retirada (criterio 6).** La vista conserva la postulación con `situation: 'retirada'`, `withdrawnAt` y un aviso que lo explica, sin importar si se retiró por el backoffice de prácticas o por `WithdrawConvocatoria` (HU-50). Si la oferta deja de figurar como práctica (reclasificada, archivada por retención o devuelta a revisión) queda como `no-disponible` con su propio aviso. El título y la empresa se copian al empezar a seguir, para que el estudiante sepa cuál era.
+
+### Limitaciones explícitas
+
+- **El aviso de retiro se muestra en la vista, no llega como notificación.** `PendingNotification` no distingue tipos de aviso y el envío real (push) todavía no existe (HU-18). Cuando exista, el retiro puede avisar a los seguidores desde `NotificationSchedulingAdapter.cancelScheduledNotifications`.
+- **La vista carga todas las prácticas y cruza en memoria**, igual que el listado de HU-22.
+- **No hay forma de dejar de seguir** una oferta: `cerrado` cumple ese papel. Borrar el seguimiento solo ocurre por supresión (HU-48).
+
+### Colección MongoDB
+
+- `practice_application_tracking`: `_id = studentId|offerId`. Índices `idx_student_updated` `{ studentId: 1, updatedAt: -1 }` (vista del estudiante) e `idx_offer_status` `{ offerId: 1, status: 1 }` (seguidores por ciclo del planificador).
+
+### Criterios de aceptación y pruebas
+
+| # | Criterio | Pruebas |
+|---|---|---|
+| 1 | Seleccionar interesado, postulado, en proceso o cerrado | `tests/practices/PracticeApplicationTracking.test.ts` › criterio 1 |
+| 2 | Cambio persistido con marca de tiempo y visible en el seguimiento | › criterio 2; `tests/infrastructure/mongo/MongoPracticeApplicationTracking.integration.test.ts` |
+| 3 | Recordatorio de cierre según la anticipación | › criterio 3 (planificador real de HU-19: fuera de la segmentación, anticipación propia, estados sin aviso, sin duplicar, categoría desactivada, retirada); integración Mongo |
+| 4 | Invisible para terceros y para el administrador | › criterio 4 |
+| 5 | Vista agrupada por estado | › criterio 5 |
+| 6 | Oferta retirada informada en vez de desaparecer | › criterio 6 (backoffice de prácticas, HU-50 directo, oferta que deja de figurar); integración Mongo |
+
+Mutaciones comprobadas: no sumar a los seguidores hace fallar 2 pruebas; ignorar el retiro, 3; no agregar al historial, 1; permitir seguir una oferta retirada, 1; avisar en todos los estados, 1.
+
 ## Pendientes
 
 - **Extracción automática** de empresa, requisitos y modalidad desde el correo (decisión 1 de HU-24). Cuando exista, debe guardarlos en `practice_offers` y HU-22 los mostrará sin cambios.
-- **Capa HTTP y cliente móvil** de HU-22 (listado, filtros, detalle).
+- **Capa HTTP y cliente móvil** de HU-22 (listado, filtros, detalle) y de HU-23 (seguimiento).
+- **Notificación del retiro** a quien seguía la oferta, cuando exista el envío real (ver limitaciones de HU-23).
 - **Consolidar en sentido inverso** (carga manual y luego correo), ver limitaciones.

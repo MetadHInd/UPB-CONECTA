@@ -8,6 +8,7 @@ import type { StudentDirectoryPort } from '../domain/ports/out/StudentDirectoryP
 import type { NotificationPreferencesRepositoryPort } from '../domain/ports/out/NotificationPreferencesRepositoryPort.js';
 import type { EmittedReminderRegistryPort } from '../domain/ports/out/EmittedReminderRegistryPort.js';
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
+import type { ConvocatoriaFollowersPort } from '../domain/ports/out/ConvocatoriaFollowersPort.js';
 import { defaultPreferences } from '../domain/entities/NotificationPreferences.js';
 import { NotificationPreferencesPolicy } from '../domain/services/NotificationPreferencesPolicy.js';
 import { NotificationScheduler, computeUrgency } from '../domain/services/NotificationScheduler.js';
@@ -30,6 +31,13 @@ export interface EmitDueDateRemindersDependencies {
   readonly emittedReminders: EmittedReminderRegistryPort;
   readonly systemThresholds: readonly AnticipationThreshold[];
   readonly clock: ClockPort;
+  /**
+   * HU-23, criterio 3: quienes siguen la convocatoria por su cuenta (una
+   * practica marcada de interes o de postulacion) tambien reciben el aviso,
+   * aunque su programa no este en la segmentacion. Opcional: sin el, el
+   * publico es solo el de la segmentacion, como en HU-19.
+   */
+  readonly followers?: ConvocatoriaFollowersPort;
 }
 
 /**
@@ -70,6 +78,12 @@ export class EmitDueDateReminders {
     const produced: PendingNotification[] = [];
 
     const candidates = await this.deps.dueDateSource.findWithDueDate();
+    // Una sola consulta por ciclo, no una por convocatoria.
+    const followersByMessageId = this.deps.followers
+      ? await this.deps.followers.findFollowers(
+          candidates.flatMap((candidate) => (candidate.representativeMessageId ? [candidate.representativeMessageId] : []))
+        )
+      : new Map<string, readonly string[]>();
 
     for (const candidate of candidates) {
       // Criterio 4: retirada o vencida no emite.
@@ -89,12 +103,19 @@ export class EmitDueDateReminders {
       const dueAt = candidate.dueAt;
       const dueAtEpochMs = dueAt.getTime();
 
-      for (const student of students) {
-        if (!targetingIncludesProgram(targeting, student.programId, this.deps.facultyResolver)) continue;
+      // Publico: la segmentacion mas quienes la siguen (HU-23). Un Set, para
+      // que quien esta en ambos reciba un solo aviso por umbral.
+      const audience = new Set(
+        students
+          .filter((student) => targetingIncludesProgram(targeting, student.programId, this.deps.facultyResolver))
+          .map((student) => student.studentId)
+      );
+      for (const follower of followersByMessageId.get(candidate.representativeMessageId) ?? []) audience.add(follower);
 
-        const preferences = (await this.deps.preferencesRepo.findByStudent(student.studentId)) ?? defaultPreferences(student.studentId, now);
+      for (const studentId of audience) {
+        const preferences = (await this.deps.preferencesRepo.findByStudent(studentId)) ?? defaultPreferences(studentId, now);
 
-        // Criterio 5: categoria desactivada no emite.
+        // Criterio 5: categoria desactivada no emite, tampoco para quien la sigue.
         if (!policy.isCategoryEnabled(preferences, classification.finalCategory)) continue;
 
         const reminders = scheduler.computeReminders(
@@ -108,7 +129,7 @@ export class EmitDueDateReminders {
           if (reminder.firesAt.getTime() > now.getTime()) continue; // todavia no llega su instante
 
           const already = await this.deps.emittedReminders.wasEmitted(
-            student.studentId,
+            studentId,
             candidate.convocatoriaId,
             reminder.thresholdMinutes,
             dueAtEpochMs
@@ -116,13 +137,13 @@ export class EmitDueDateReminders {
           if (already) continue;
 
           produced.push({
-            studentId: student.studentId,
+            studentId,
             convocatoriaId: candidate.convocatoriaId,
             urgency: computeUrgency(dueAtEpochMs - now.getTime()),
             generatedAt: now
           });
 
-          await this.deps.emittedReminders.markEmitted(student.studentId, candidate.convocatoriaId, reminder.thresholdMinutes, dueAtEpochMs, now);
+          await this.deps.emittedReminders.markEmitted(studentId, candidate.convocatoriaId, reminder.thresholdMinutes, dueAtEpochMs, now);
         }
       }
     }
