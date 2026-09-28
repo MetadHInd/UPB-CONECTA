@@ -2,6 +2,7 @@ import type { LogoutResult } from '../domain/entities/SessionResult.js';
 import type { ClockPort } from '../domain/ports/out/ClockPort.js';
 import type { DeviceInvalidationPort } from '../domain/ports/out/DeviceInvalidationPort.js';
 import type { RefreshTokenRepositoryPort } from '../domain/ports/out/RefreshTokenRepositoryPort.js';
+import type { SessionEndedPort } from '../domain/ports/out/SessionEndedPort.js';
 import type { SecurityAuditLogPort } from '../domain/ports/out/SecurityAuditLogPort.js';
 import type { TokenSigningPort } from '../domain/ports/out/TokenSigningPort.js';
 import { verifySessionToken } from './SessionTokenVerification.js';
@@ -25,6 +26,10 @@ export interface LogoutSessionInput {
  * (criterio 2). La cadena se revoca primero, porque es lo que corta el
  * acceso; si la baja del dispositivo falla, el error se propaga y el cliente
  * reintenta: ambas operaciones son idempotentes.
+ *
+ * HU-40: con `sessionEnded`, lo que dependía de la sesión (el contexto de la
+ * conversación del chatbot) se descarta despues de revocar la cadena. Tambien
+ * es idempotente.
  */
 export class LogoutSession {
   constructor(
@@ -34,6 +39,7 @@ export class LogoutSession {
       readonly audit: SecurityAuditLogPort;
       readonly clock: ClockPort;
       readonly devices: DeviceInvalidationPort;
+      readonly sessionEnded?: SessionEndedPort;
     }
   ) {}
 
@@ -45,6 +51,7 @@ export class LogoutSession {
     if (input.deviceToken !== undefined) {
       await this.dependencies.devices.invalidateForStudent(verified.claims.subject, input.deviceToken);
     }
+    await this.dependencies.sessionEnded?.sessionEnded(verified.claims.chainId);
     return { ok: true };
   }
 }
