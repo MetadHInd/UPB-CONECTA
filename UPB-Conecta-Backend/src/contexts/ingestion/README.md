@@ -1,0 +1,501 @@
+# UPB Conecta, contexto de ingesta
+
+> Documentación específica de este contexto acotado. Para la visión general del proyecto, la arquitectura y cómo levantar todo el entorno (incluyendo MongoDB), ver el [README raíz](../../../README.md).
+
+Implementacion de **HU-01 (SCRUM-13): Conexion programada e idempotente al buzon institucional recolector**,
+**HU-02 (SCRUM-14): Extraccion de metadatos y normalizacion del cuerpo del mensaje**,
+**HU-03 (SCRUM-15): Deduplicacion por contenido dentro de ventana temporal configurable**,
+**HU-04 (SCRUM-16): Cuarentena de mensajes no procesables y bitacora de ingesta** (criterios 1-4; criterio 5 diferido, ver seccion propia),
+**HU-08 (SCRUM-20): Extraccion de fecha de cierre y enlace de postulacion**,
+**HU-55 (SCRUM-67): Rendimiento bajo carga y degradacion controlada** (criterios 2, 3, 4 y 6 — 3 y 4 parciales; 1, 5 y 7 diferidos, ver seccion propia) y
+**HU-15 (SCRUM-27): Vista de detalle de la convocatoria** (criterios 1-4; criterio 5 diferido, depende de HU-24) y
+**HU-50 (SCRUM-62): Publicacion y retiro manual de contenido del feed**.
+Trazabilidad: RF-01, RF-02, RF-03, RF-04, RF-05, RF-06, RF-07, RF-11, RF-12, RF-22, RF-36, RF-42, RF-74, RNF-01 a RNF-12, RNF-18, RNF-27, RNF-40. Caso de uso CU-01, pasos 1 a 6, flujo alternativo A, excepcion E2. CU-02 paso 7.
+
+## Stack
+
+TypeScript sobre Node.js, MongoDB como motor documental, Vitest para pruebas.
+
+## Estructura
+
+    src/contexts/ingestion/
+      domain/          value objects, entidades, politicas y puertos. No importa infraestructura.
+      application/     el caso de uso. Orquesta puertos, no conoce IMAP ni MongoDB.
+      infrastructure/  configuracion, planificador y adaptadores IMAP, MongoDB y en memoria.
+    src/main.ts        raiz de composicion, unico punto donde se eligen adaptadores concretos.
+
+## Comandos
+
+    npm install
+    npm run typecheck            # TypeScript estricto
+    npm run check:architecture   # regla de dependencia (RNF-41)
+    npm test                     # 187 pruebas (requiere MongoDB real corriendo, ver README raíz)
+    npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
+
+## Criterios de aceptacion y donde se verifican
+
+| Criterio | Prueba |
+|---|---|
+| 1. El planificador dispara la ingesta sin intervencion humana | `IngestionScheduler.test.ts` |
+| 2. La frecuencia cambia sin recompilar ni redesplegar | `IngestionConfig.test.ts`, `IngestionScheduler.test.ts` |
+| 3. La reejecucion sobre el mismo lote no genera documentos nuevos | `IngestInstitutionalMessages.test.ts`, `MongoProcessedMessageRegistry.integration.test.ts` |
+| 4. La identidad se determina por Message-ID, no por asunto ni fecha | `MessageId.test.ts`, `IdempotencyPolicy.test.ts` |
+| 5. Un fallo a mitad de lote conserva el punto de lectura | `IngestInstitutionalMessages.test.ts`, `IngestionCursor.test.ts`, `MongoIngestionCursorRepository.integration.test.ts` |
+| RF-07. Bitácora de ingesta consultable | `MongoIngestionRunLogRepository.integration.test.ts` |
+| HU-05. Reintento con espera exponencial ante indisponibilidad del buzón y Circuit Breaker | `RetryingMailboxAdapter.test.ts`, `CircuitBreakerMailboxAdapter.test.ts` |
+
+## HU-02 — Extracción de metadatos y normalización del cuerpo (RF-03, RF-04)
+
+Traduce cada `RawInstitutionalMessage` (HU-01, sin normalizar) a un
+`InstitutionalMessage`: remitente, asunto, cuerpo en texto plano, fecha de
+envío y destinatarios declarados, listo para el clasificador (HU-06 en
+adelante). Vive enteramente en infraestructura
+(`infrastructure/normalization/MimeMessageNormalizer.ts`) — el dominio no
+sabe que existe MIME, HTML ni juegos de caracteres; esa es la frontera ACL
+que exige el diseño de la historia (revisión de literatura, sección 5.2).
+
+No se integró en `MailboxIngestionPort`: la idempotencia (HU-01) sólo necesita `messageId` y
+`mailboxUid`, no el cuerpo normalizado, así que ese puerto no lo requiere. Sí se conectó al caso
+de uso `IngestInstitutionalMessages` a partir de HU-03 (ver más abajo), a través del puerto
+`MessageNormalizerPort` — la deduplicación semántica necesita remitente, asunto y cuerpo ya
+normalizados para poder comparar reenvíos entre sí.
+
+| Criterio | Prueba |
+|---|---|
+| 1. Extrae remitente, asunto, cuerpo, fecha de envío y destinatarios en `InstitutionalMessage` | `MimeMessageNormalizer.test.ts` — criterio 1 |
+| 2. HTML a texto plano legible conservando todas las direcciones web | `MimeMessageNormalizer.test.ts` — criterio 2 |
+| 3. Elimina firma institucional, aviso legal y cadena de reenvío | `MimeMessageNormalizer.test.ts` — criterio 3 |
+| 4. Codificación no UTF-8 o caracteres acentuados mal codificados se conservan sin corrupción | `MimeMessageNormalizer.test.ts` — criterio 4 |
+| 5. Un adjunto no interrumpe el procesamiento y su presencia queda como metadato | `MimeMessageNormalizer.test.ts` — criterio 5 |
+| Definición de terminado: ≥ 15 correos institucionales anonimizados (HTML, texto plano, multiparte, reenvío) | `infrastructure/fixtures/institutionalMessageSources.ts` (19 fixtures) |
+
+## HU-03 — Deduplicación por contenido en ventana temporal (RF-05, CU-01 paso 5)
+
+Un reenvío institucional (recordatorio de una convocatoria ya anunciada) llega con un
+`Message-ID` propio, así que `IdempotencyPolicy` (HU-01) lo deja pasar: esa política evita
+reprocesar el *mismo* mensaje, no reconoce que dos mensajes *distintos* son, en la práctica, el
+mismo aviso. `DeduplicationPolicy` (`domain/services/DeduplicationPolicy.ts`) resuelve esa
+deduplicación semántica: agrupa por remitente+asunto dentro de una ventana temporal
+configurable, ancla la ventana al **último** envío visto (no al primero, para no cortar una
+cadena de recordatorios periódicos), conserva la fecha del primer envío y cuenta los reenvíos.
+
+Se invoca en `IngestInstitutionalMessages.handle()` justo después de que `IdempotencyPolicy`
+aprueba el mensaje, sobre el `InstitutionalMessage` ya normalizado (de ahí que HU-03 conectara
+por primera vez `MimeMessageNormalizerAdapter` al caso de uso). El resultado se persiste vía
+`ConsolidatedMessageRegistryPort`, distinto de `ProcessedMessageRegistryPort`: uno resuelve
+idempotencia técnica por `Message-ID`, el otro deduplicación semántica por contenido.
+
+| Criterio | Prueba |
+|---|---|
+| 1. Mismo remitente y asunto dentro de la ventana → se consolidan en un único documento | `DeduplicationPolicy.test.ts`, `IngestInstitutionalMessages.test.ts` |
+| 2. La consolidación conserva la fecha del primer envío y cuenta los reenvíos | `DeduplicationPolicy.test.ts`, `MongoConsolidatedMessageRegistry.integration.test.ts` |
+| 3. Mismo asunto pero fuera de la ventana → convocatorias distintas | `DeduplicationPolicy.test.ts` (bordes de ventana), `MongoConsolidatedMessageRegistry.integration.test.ts` |
+| 4. La ventana cambia por variable de entorno sin redespliegue | `IngestionConfig.test.ts` (`DEDUPLICATION_WINDOW_MS`) |
+| 5. Un reenvío con cuerpo modificado actualiza el documento existente, no crea uno nuevo | `DeduplicationPolicy.test.ts`, `IngestInstitutionalMessages.test.ts` |
+| Definición de terminado: pruebas parametrizadas sobre los bordes de la ventana | `DeduplicationPolicy.test.ts` (`it.each` en `windowMs-1`, `windowMs`, `windowMs+1`) |
+
+## HU-04 — Cuarentena de mensajes no procesables y bitácora (RF-06, RF-07, RNF-12, CU-01 E2)
+
+Un mensaje que `ImapMailboxAdapter` no puede traducir (hoy, por falta de `Message-ID`)
+ya no se descarta ni se limita a incrementar un contador: se persiste vía
+`QuarantineRepositoryPort` con su causa y su contenido crudo original, para que quede
+disponible para diagnóstico y, más adelante, para reprocesamiento. `MailboxIngestionPort`
+declara el nuevo tipo `UntranslatableMessage { mailboxUid, cause, rawSource }` — el
+callback `setOnUntranslatable` pasó de reportar solo `(uid, cause)` a reportar también
+el origen crudo.
+
+`QuarantineIncidentPolicy` (servicio de dominio) evalúa, al terminar cada ejecución, si
+la proporción de mensajes en cuarentena sobre el total intentado (`quarantined / (read +
+quarantined)`) supera un umbral configurable; si lo supera, marca `IngestionRunLog.priorityReview`.
+El umbral se calcula sobre el total intentado y no solo sobre `read` porque un mensaje en
+cuarentena nunca se cuenta como leído — dividir solo por `read` dejaría sin detectar el
+caso más grave, un lote enteramente en cuarentena (`read = 0`).
+
+**Alcance de esta historia (5 SP) vs. definido en Jira:** los criterios 1 (persistencia con
+causa, el lote continúa), 2 (bitácora — ya existía desde HU-01) y 3 (contenido crudo
+consultable) y 4 (umbral configurable) están implementados. El **criterio 5** (reprocesar un
+mensaje en cuarentena "corregido en la configuración" desde un panel, sin reingesta
+completa) queda **diferido**: requiere un punto de entrada que dispare el reprocesamiento
+de un UID específico, y ese punto de entrada es naturalmente HTTP — que el backend todavía
+no expone (mismo bloqueante documentado en el README raíz y en
+`Frontend/ARQUITECTURA-INTEGRACION.md`). Tampoco avanza el `IngestionCursor` para un UID en
+cuarentena, así que puede volver a reportarse en ejecuciones futuras hasta que ese
+mecanismo de reprocesamiento exista.
+
+| Criterio | Prueba |
+|---|---|
+| 1. Un mensaje no traducible se cuarentena con su causa y el lote continúa | `IngestInstitutionalMessages.quarantine.test.ts`, `ImapMailboxAdapter.test.ts` |
+| 2. La bitácora muestra leídos, procesados, duplicados y cuarentena con marca de tiempo | `IngestionRunLog` (ya cubierto desde HU-01) |
+| 3. El contenido crudo original queda disponible para diagnóstico | `IngestInstitutionalMessages.quarantine.test.ts`, `MongoQuarantineRepository.integration.test.ts` |
+| 4. Una proporción de cuarentena que supera el umbral marca el incidente para revisión prioritaria | `QuarantineIncidentPolicy.test.ts`, `IngestInstitutionalMessages.quarantine.test.ts` |
+| 5. Reprocesar un mensaje corregido sin reingesta completa | **Diferido** — necesita un punto de entrada HTTP que no existe todavía |
+| Definición de terminado: mensaje malformado en mitad del lote, los posteriores se procesan | `IngestInstitutionalMessages.quarantine.test.ts` |
+
+## HU-08 — Extracción de fecha de cierre y enlace de postulación (RF-11, RF-12, RNF-27, CU-01 paso 6)
+
+Interpreta la fecha límite y el enlace de postulación sobre el `body` ya normalizado por HU-02. `DueDate`
+(dominio) es una unión discriminada con tres estados explícitos —`con-fecha`, `sin-vencimiento`, `ambigua`—
+en vez de `Date | null`: un `null` no distingue "no hay plazo" de "no se pudo interpretar la fecha", y esa
+distinción es la que le permite al estudiante confiar en el dato o saber que debe verificarlo.
+
+`SpanishDueDateExtractor` (`infrastructure/extraction/`) vive en infraestructura por el mismo motivo que el
+normalizador MIME de HU-02: es interpretación de lenguaje natural sobre texto, no una regla de negocio.
+**Sin dependencias nuevas** (regex + `Date` nativo), decisión consistente con HU-02. Reconoce fechas numéricas
+(`dd/mm/aaaa`) y textuales en español (`"el 12 de septiembre"`, con o sin año, con o sin día de la semana);
+cuando hay varias fechas en el cuerpo, ancla la de cierre a palabras clave que la preceden (`cierre`, `hasta`,
+`plazo`, `vence`, `límite`) para distinguirla de otras menciones (p. ej. la fecha de un evento). Si ninguna o
+más de una fecha queda igualmente anclada, el resultado es `ambigua` en vez de adivinar. El año ausente se
+infiere del año de envío del mensaje, saltando al año siguiente si la fecha resultante ya pasó. Las fechas
+se representan en UTC como medianoche de Colombia (UTC-05:00).
+
+Se invoca en `IngestInstitutionalMessages.consolidate()`, junto a la deduplicación de HU-03: el resultado se
+guarda en el mismo `ConsolidatedMessageRecord` (`dueDate`, `applicationLink`). En un reenvío con el mismo
+cuerpo se conserva la extracción original (evita que la inferencia de año, que depende de la fecha de envío,
+"derive" entre reenvíos); si el cuerpo cambió (criterio 5 de HU-03), se reinterpreta desde cero.
+
+| Criterio | Prueba |
+|---|---|
+| 1. Fecha declarada se extrae en ISO 8601, zona horaria de Colombia | `SpanishDueDateExtractor.test.ts` |
+| 2. Sin plazo declarado, se marca explícitamente "sin vencimiento" | `SpanishDueDateExtractor.test.ts` |
+| 3. Fechas en lenguaje natural en español (con/sin año, con día de la semana) | `SpanishDueDateExtractor.test.ts` |
+| 4. Entre fecha de evento y fecha de cierre, se selecciona la de cierre; contradicción → ambigua | `SpanishDueDateExtractor.test.ts` |
+| 5. Enlace de postulación identificado y almacenado | `SpanishDueDateExtractor.test.ts`, `IngestInstitutionalMessages.test.ts` |
+| Definición de terminado: ≥95% de acierto sobre un corpus etiquetado | `SpanishDueDateExtractor.accuracy.test.ts` (20 mensajes, 100% en la última corrida) |
+
+## Clasificación conectada a la ingesta (corrección técnica de HU-06/HU-09/HU-10)
+
+No es una historia nueva. Hasta HU-10, `consolidate()` tenía una copia de unas
+19 líneas de la clasificación de HU-06 (`classifier.classify` → guardar, o
+cola de reintento), con tres dependencias sueltas: `classifier`,
+`classificationRetryQueue` y `classificationResultRepository`. Esa copia
+nunca recibió las reglas de HU-09 ni el umbral de HU-10, y `main.ts` no la
+conectaba.
+
+- `IngestInstitutionalMessagesDependencies` ahora tiene **una sola**
+  dependencia opcional, `classifyMessage?: ClassifyInstitutionalMessage`. El
+  bloque duplicado se reemplazó por `classifyMessage?.execute(normalizado,
+  previousMessageId)`.
+- **Política de reenvíos (opción B):** se clasifica cada mensaje, también los
+  reenvíos, porque cada uno pasa a ser el `representativeMessageId` del grupo
+  y el feed lee su estado. Solo se alerta o se notifica si el estado de
+  publicación del grupo cambia. Justificación completa (y por qué la opción A
+  rompería la exclusión del feed) en el README de `classification`.
+- Si el clasificador falla, `ClassifyInstitutionalMessage` manda el mensaje a
+  su cola de reintento y el lote continúa, igual que antes.
+- `main.ts` **sí conecta** la clasificación. Hoy todo es simulado (buzón de
+  prueba y stubs de alerta y notificaciones), así que no hay efecto externo.
+  Dejarla desconectada habría mantenido muerto el camino que esta corrección
+  unifica. El riesgo al conectar el buzón real está advertido en `main.ts`.
+
+Pruebas: `tests/ingestion/IngestionClassification.test.ts` (mensaje nuevo,
+reenvío sin cambio de estado, reenvío en revisión, reenvío que pasa de
+revisión a publicado, fallo del clasificador sin romper el lote) y
+`tests/classification/PublicationNotificationPolicy.test.ts`. La prueba de
+rendimiento de HU-55 sigue midiendo el pipeline **sin** clasificador.
+
+## Corrección: un mensaje que falla siempre ya no bloquea el buzón (bug 2)
+
+Corrección técnica posterior a HU-37 (rama `correccion-bugs-integracion`), no una historia del backlog.
+
+**Problema real (confirmado con prueba).** Si procesar un mensaje lanza una excepción (normalización, extracción, consolidación, registro), la ingesta conserva el cursor en el último mensaje confirmado (HU-01) y aborta el ciclo. Un mensaje que falla **siempre** se relee en cada ciclo, para siempre, y **nada de lo que llegó después se procesa nunca**. Prueba: `tests/application/IngestInstitutionalMessages.poisonMessage.test.ts`; antes de la corrección, el tercer ciclo seguía abortando.
+
+El prompt describía el bug como reintentos sin límite en "la cola de reintento de mailbox de HU-05". **Esa cola no existe.** HU-05 (`RetryingMailboxAdapter`) reintenta la *lectura* del buzón dentro de un mismo ciclo ante `MailboxUnavailableError`, con backoff y un límite propio (`MAILBOX_RETRY_MAX_ATTEMPTS`). No reintenta mensajes individuales entre ciclos. El reintento indefinido entre ciclos era este bloqueo por mensaje, y ahí se aplicó el contador.
+
+**Corrección.**
+- `MessageFailureRepositoryPort.recordFailure(uid, cause, at)` cuenta los ciclos fallidos por uid (memoria y Mongo; `ingestion_message_failures`, `$inc` atómico).
+- Mientras el contador esté por debajo del umbral, el comportamiento es **el mismo de antes**: se conserva el cursor y se aborta el ciclo, así un fallo transitorio se resuelve solo en el siguiente ciclo.
+- Al alcanzar el umbral, el mensaje se guarda en **cuarentena** (`QuarantineRepositoryPort` de HU-04) con la causa y el número de ciclos, se cuenta en `log.quarantined` (entra en el umbral de incidente de HU-04), el cursor avanza sobre él y **el lote continúa**.
+- Como `RawInstitutionalMessage` ya no conserva el MIME original, `rawSource` es una reconstrucción de los encabezados que sí conserva (`Message-ID`, `From`, `Subject`, `Date`) más el cuerpo crudo.
+- **Si el propio contador no se puede escribir** (por ejemplo, Mongo caído), no se pone nada en cuarentena y se propaga el error original. Una caída de infraestructura no debe mandar mensajes sanos a cuarentena.
+
+**Umbral.** `INGESTION_MESSAGE_MAX_ATTEMPTS`, por defecto **3**. Con el intervalo por defecto de 5 minutos equivale a unos 15 minutos de bloqueo antes de la cuarentena. Se lee al arrancar, igual que `DEDUPLICATION_WINDOW_MS`: cambiarlo requiere reiniciar, no recompilar. Es un umbral **solo para el buzón**, distinto de `MAILBOX_RETRY_MAX_ATTEMPTS`: aquel cuenta reintentos de lectura dentro de un ciclo, este cuenta ciclos fallidos del mismo mensaje. **El prompt pedía el umbral también para la clasificación y eso quedó pendiente:** su cola no tiene consumidor que reintente, así que primero hace falta ese consumidor. Ver "Gap pendiente: umbral de reintentos de clasificación hacia cuarentena" en el README de `classification`.
+
+**Limitaciones conocidas.**
+- Un fallo parcial (por ejemplo, consolidado pero sin llegar a `markAsProcessed`) puede dejar un documento consolidado de un mensaje que termina en cuarentena. Es el mismo riesgo que ya existía entre ciclos.
+- Una falla de infraestructura *parcial* (una colección caída y otra no) podría acumular fallos en un mensaje sano. El umbral y la cuarentena reversible lo acotan: reprocesar desde cuarentena sigue siendo el criterio 5 diferido de HU-04.
+- `IngestInstitutionalMessages` recibe la política como dependencia opcional (`poisonMessages`), igual que `classifyMessage`. `main.ts` la cablea.
+
+## HU-55 — Rendimiento bajo carga y degradación controlada (RNF-01 a RNF-12, RNF-40) — **parcial**
+
+Historia de verificación transversal (300 sesiones concurrentes, 3.000 usuarios, feed/foro/mapa con
+disponibilidad ≥99%, etc.) que en su mayoría depende de subsistemas que todavía no existen en este backend
+(mapa, notificaciones push, capa HTTP con carga concurrente real). Se implementan los criterios verificables
+contra lo que sí existe hoy — el pipeline de ingesta, el feed segmentado y el foro:
+
+- **Criterio 2 — "con 20.000 documentos, el feed y el foro conservan los tiempos apoyados en índices sobre
+  programa, tema y fecha"**: cubierto contra **MongoDB real, no mocks**, ejercitando el camino de producción
+  real (`MongoConvocatoriaRepository` + `GetSegmentedFeed` + `MongoProgramTargetingRepository` para el feed,
+  `MongoPostRepository` para el foro). Este criterio expuso un problema real de N+1 en `GetSegmentedFeed` (no
+  solo falta de índice) que se corrigió — detalle completo, con números de antes/después, en el
+  [README de `feed`](../feed/README.md#hu-55-scrum-67--criterio-2-rendimiento-del-feed-y-del-foro-con-20000-documentos).
+- **Criterio 3 (parcial) — "se ingiere, normaliza y clasifica en menos de 5 minutos"**: la
+  *clasificación* (HU-06 en adelante) no existe todavía, así que se mide lo que sí existe del pipeline:
+  ingesta + idempotencia (HU-01) + normalización (HU-02) + deduplicación (HU-03) + cuarentena (HU-04) +
+  extracción de fecha/enlace (HU-08), sobre un lote sintético de 200 mensajes (`syntheticMessages.ts`,
+  reproducible: mismo `count` siempre genera los mismos mensajes) contra **MongoDB real, no mocks** — el
+  cuello de botella más realista dado que no hay buzón IMAP real todavía. En la última corrida local: ~1.1s
+  para 200 mensajes, muy por debajo del presupuesto de 5 minutos.
+- **Criterio 4 (parcial) — "la aplicación sigue sirviendo el contenido ya almacenado" ante la caída del
+  buzón**: no existe ninguna capa que sirva contenido (sin feed, sin HTTP), así que el proxy verificable es
+  que una caída del buzón durante un ciclo no borre ni corrompa lo consolidado en ejecuciones anteriores —
+  exactamente lo que una futura capa de feed tendría que leer.
+- **Criterio 6 — "ante cualquier interrupción del proceso, no se pierde un mensaje del buzón ni una
+  publicación enviada por un estudiante"**: dos escenarios, distintos del criterio 4 (que cubre el buzón
+  caído *antes* de empezar el ciclo):
+  - **Interrupción a mitad de un ciclo de ingesta** (no antes de leerlo): dos pruebas nuevas en
+    `tests/application/IngestInstitutionalMessages.midCycleInterruption.test.ts` demuestran que el cursor
+    (RF-02, criterio 5) conserva el último mensaje confirmado y que la idempotencia por `Message-ID` (HU-01)
+    evita duplicar lo ya consolidado incluso si la propia persistencia del cursor se interrumpe (el
+    escenario más duro: el buzón reentrega mensajes ya consolidados y el reintento los descarta como
+    duplicados). No hizo falta código nuevo: son garantías que HU-01 ya daba, solo no estaban demostradas
+    con este enfoque explícito.
+  - **Una publicación del foro no se pierde**: `CreatePost.execute` termina con `await posts.save(post)`, y
+    `MongoPostRepository.save` usa `insertOne` (escritura reconocida por defecto) — para cuando `save`
+    retorna, la publicación ya es tan durable como el propio MongoDB. Prueba nueva en
+    `tests/forum/CreatePost.resilience.test.ts`: guarda una publicación, descarta la instancia (cliente,
+    repositorio, caso de uso) que la escribió — simulando que el proceso cae justo después de la
+    confirmación de Mongo — y la busca de nuevo con una conexión y un repositorio completamente nuevos. No
+    se encontró ningún caso real de pérdida (sin `insertMany` sin `ordered`, sin escritura
+    fire-and-forget), así que tampoco hizo falta código nuevo aquí: la prueba demuestra la garantía
+    existente.
+- **Diferidos** (criterios 1, 5, 7): requieren una capa HTTP con carga real de 300 sesiones concurrentes
+  (criterio 1), medición de disponibilidad en producción (criterio 5) e indicadores de progreso de UI
+  (criterio 7) — ninguno existe todavía en este backend.
+
+| Criterio | Estado | Prueba |
+|---|---|---|
+| 2 — 20k documentos, feed y foro apoyados en índices | Cubierto | `tests/performance/FeedAndForumThroughput.test.ts` (contra MongoDB real; detalle en README de `feed`) |
+| 3 (parcial: sin el paso de clasificación) | Cubierto | `tests/performance/IngestionThroughput.test.ts` (contra MongoDB real) |
+| 4 (parcial: proxy de persistencia, no de una capa de feed) | Cubierto | `IngestInstitutionalMessages.resilience.test.ts` |
+| 6 — ninguna interrupción pierde un mensaje del buzón ni una publicación del foro | Cubierto | `tests/application/IngestInstitutionalMessages.midCycleInterruption.test.ts`, `tests/forum/CreatePost.resilience.test.ts` |
+| 1, 5, 7 | Diferidos | Requieren capa HTTP con carga concurrente real, medición de disponibilidad en producción e indicadores de progreso de UI |
+
+## HU-15 — Vista de detalle de la convocatoria (RF-22, RF-42, CU-02 paso 7) — **parcial**
+
+"El detalle consume la misma entidad de dominio que el feed" (diseño de la historia en Jira): en vez de
+inventar una entidad `Convocatoria` nueva, `GetConvocatoriaDetail` lee directamente el
+`ConsolidatedMessageRecord` que ya produce el pipeline de ingesta (HU-01 a HU-08) — cuerpo, fecha de cierre
+(HU-08) y enlace de postulación (HU-08) ya estaban ahí, solo faltaba una forma de pedir "el detalle de esta
+convocatoria" en vez de solo "lo consolidado dentro de esta ventana temporal".
+
+- **`ConvocatoriaId`** (dominio): identificador estable (remitente + asunto + fecha del primer envío) que
+  formaliza la clave que los adaptadores de `ConsolidatedMessageRegistryPort` ya usaban internamente como
+  `_id`/clave de mapa — se extrajo a una función compartida (`convocatoriaIdToString`) para no duplicar esa
+  lógica en cada adaptador.
+- **`ConsolidatedMessageRegistryPort.findById`**: búsqueda directa por identidad, complementaria a
+  `findWithinWindow` (que busca "el grupo vigente dentro de una ventana", no "este grupo por su id").
+- **`evaluateConvocatoriaStatus`** (dominio, criterio 4): traduce `DueDate` (HU-08) a un estado explícito —
+  `vigente`, `vencida`, `sin-vencimiento` o `fecha-ambigua`. Una fecha ambigua no se fuerza a "vigente" ni a
+  "sin vencimiento": es su propio estado, para no ocultarle al estudiante que la fecha no se pudo interpretar
+  con certeza.
+- **`GetConvocatoriaDetail`** (aplicación): arma la vista completa (criterio 1), incluyendo la extracción del
+  dominio del enlace de postulación (`applicationDomain`, vía `URL.hostname`) para que el cliente lo muestre
+  antes de abrir el navegador (criterio 3 — "un enlace externo nunca se abre sin exponer el destino al
+  usuario", consistente con la Política de Seguridad). La ausencia de enlace es `null` explícito, no un campo
+  vacío (criterio 2).
+
+**Diferido:** criterio 5 (acceso directo al mapa cuando la convocatoria declara un lugar del campus) — el
+propio ticket lo marca como dependiente de HU-24 (catálogo de espacios), que no existe todavía.
+
+| Criterio | Estado | Prueba |
+|---|---|---|
+| 1. Contenido completo, fecha de cierre, remitente y enlace | Cubierto | `GetConvocatoriaDetail.test.ts` |
+| 2. Sin enlace, la ausencia se comunica de forma explícita | Cubierto | `GetConvocatoriaDetail.test.ts` |
+| 3. Dominio de destino expuesto antes de abrir el enlace | Cubierto (extracción del dominio; abrir el navegador es del cliente) | `GetConvocatoriaDetail.test.ts` |
+| 4. Estado de vencida indicado de forma inequívoca | Cubierto | `ConvocatoriaStatusPolicy.test.ts`, `GetConvocatoriaDetail.test.ts` |
+| 5. Acceso directo al mapa | Diferido | Depende de HU-24 (catálogo de espacios), no implementada |
+
+## HU-50 — Publicación y retiro manual de contenido del feed (RF-74, RF-36, RNF-18)
+
+### Alcance
+
+Un administrador de contenido publica una convocatoria construida manualmente (criterios 1, 2) y retira del feed una publicación ya visible (criterios 3, 4, 5), con auditoría completa de ambas acciones (criterio 6). Cubre lo que la ingesta automática no captó, y corrige de inmediato contenido erróneo que ya llegó a los estudiantes.
+
+**No hay servidor HTTP en este repositorio, y eso no bloquea la historia** — mismo patrón que HU-09, HU-30, HU-45 y HU-46. No existe un "formulario" real (criterio 1): se entrega `PublishConvocatoria`, el caso de uso que tanto un futuro formulario HTTP como cualquier otro proceso invocarían con los mismos datos de entrada.
+
+### Decisión: `PublishConvocatoria` no reutiliza literalmente `IngestInstitutionalMessages`
+
+El diseño de la historia en Jira dice: *"publicación manual y publicación automática invocan el mismo caso de uso `PublishConvocatoria`"*, lo que sugiere refactorizar el pipeline automático para delegar aquí.
+
+- **Opción A — refactorizar `IngestInstitutionalMessages` para delegar en `PublishConvocatoria`.** Descartada: ese pipeline ya tiene una política de reenvíos, deduplicación semántica (HU-03) e idempotencia (HU-01) fuertemente probadas (más de 80 pruebas dependen de su comportamiento actual). Operarle cirugía para esta historia es un riesgo alto y un alcance mayor al que pide HU-50.
+- **Opción B (la implementada) — `PublishConvocatoria` reproduce el mismo estado final, sin compartir código.** Escribe en los mismos tres repositorios que ya orquesta `CorrectClassification` (HU-11): `ConsolidatedMessageRegistryPort` (aquí), `ClassificationResultRepositoryPort` (classification) y `ProgramTargetingRepositoryPort` (targeting) — funcionalmente equivalente al resultado de la ingesta automática, no literalmente el mismo objeto en memoria.
+
+Como no hay clasificador involucrado, la categoría la fija el administrador directamente; el registro persistido usa `ConfidenceScore.certain()` (1) porque no hay incertidumbre de modelo que reportar — es una decisión humana, no una predicción.
+
+**Identidad de una convocatoria manual.** No existe un `Message-ID` real de correo del que derivar `representativeMessageId`. `ManualMessageIdGeneratorPort` (`RandomManualMessageIdGenerator` en infraestructura, UUID v4 con `node:crypto`) genera uno sintético con la misma forma que exige `MessageId.fromHeader` (incluye `@`), para no crear un segundo esquema de identidad paralelo.
+
+**Sin validación de esquema de entrada aquí, a propósito.** Validar la forma de los datos que llegan a un punto de entrada es el criterio 3 de HU-47 ("hardening del transporte, validación de entradas"), historia hermana de este mismo backlog. Duplicar esa responsabilidad aquí reabriría esa historia en dos lugares.
+
+### Decisión: dónde vive el estado "retirada"
+
+`ConsolidatedMessageRecord` gana `withdrawnAt: Date | null`. Se evaluaron dos alternativas:
+
+- **Un tercer valor de `ClassificationResultRecord.publicationStatus`** (`classification`, hoy `'published' | 'pending-review'`). Descartada: ese campo representa si el **clasificador** confía en el documento, una pregunta distinta de si un **administrador** decidió retirarlo después de publicado — conflicta dos ejes de decisión distintos en un solo campo, y obligaría a `classification` a modelar un concepto (retiro de contenido) que no le pertenece.
+- **`withdrawnAt` en `ConsolidatedMessageRecord`** (la elegida). Vive en el mismo lugar que ya lee el feed y el detalle directamente (HU-12, HU-15) — ninguna entidad nueva, ningún contexto nuevo. Igual que la cuarentena de HU-04, el documento **no se borra**: se marca, y el resto del sistema decide qué hacer con eso.
+
+Un reenvío que llega después de un retiro **no lo revierte automáticamente** — `IngestInstitutionalMessages` conserva `existing.withdrawnAt` en la ruta de actualización; deshacer en silencio la decisión de un administrador sería peor que no resucitar el contenido.
+
+### Efectos en cascada del retiro (criterios 3, 4, 5)
+
+- **Criterio 3 (feed).** `GetSegmentedFeed` (contexto `feed`) excluye cualquier entrada con `withdrawnAt` presente — misma familia de chequeo que la exclusión por revisión pendiente (HU-10). El chequeo es *truthy*, no `!== null`: dobles de prueba anteriores a esta historia construyen `record` parcial sin declarar el campo (`undefined`), y un histórico sin el campo nunca fue retirado.
+- **Criterio 4 (notificaciones).** `NotificationSchedulingPort` (contexto `classification`) gana `cancelScheduledNotifications(messageId)`, agregado de forma **aditiva** — no cambia la firma de `scheduleForPublication`, que ya usan `ClassifyInstitutionalMessage` (HU-06/HU-10) y `CorrectClassification` (HU-11). El adaptador en memoria sigue siendo el stub explícito de HU-10 (gap 2): solo registra la llamada, sin planificador real todavía (HU-20).
+- **Criterio 5 (detalle).** `GetConvocatoriaDetail` (HU-15) gana `withdrawn: boolean` y `withdrawnAt: Date | null` en `ConvocatoriaDetail`. No se oculta el resto del contenido (`body`, `sender`, etc.): el criterio pide "informar", no "romper" — el cliente decide cómo mostrar el aviso sobre contenido que el estudiante ya tenía guardado (`personalization`, HU-16, no necesitó cambios: nunca resuelve la convocatoria subyacente, solo guarda banderas opacas por `convocatoriaId`).
+
+### Auditoría (criterio 6): `ConvocatoriaAuditLogPort`, no `AuthorizationAuditLogPort`
+
+Nuevo puerto append-only (`domain/ports/out/ConvocatoriaAuditLogPort.ts`; `MongoConvocatoriaAuditLog`, colección `ingestion_convocatoria_audit`, `insertOne`) — mismo patrón que `MongoForumAccessAuditLog` (HU-30), `MongoClassificationCorrectionRepository` (HU-11) y `MongoAuthorizationAuditLog` (HU-46).
+
+No se reutilizó `AuthorizationAuditLogPort` de `identity` (HU-46): ese log está acotado a "intentos no autorizados" y "cambios de rol" — eventos de seguridad de una cuenta. Publicar o retirar contenido es una decisión de negocio sobre una convocatoria, con un "objeto afectado" que ese contrato no modela. Mezclar ambos conceptos obligaría al log de seguridad a conocer convocatorias, o a este a conocer roles.
+
+### Autorización
+
+`PublishConvocatoria` y `WithdrawConvocatoria` están declaradas en `config/protected-operations.json` como `content-admin` (HU-46) — el mismo mecanismo de `AuthorizeOperation` que ya cubre `ManageTopics` y `CorrectClassification` protege estas dos operaciones cuando exista el adaptador de entrada que las invoque.
+
+### Puertos y adaptadores nuevos
+
+| Pieza | Capa | Rol |
+|---|---|---|
+| `ConsolidatedMessageRecord.withdrawnAt` | Dominio (dato) | Estado de retiro de una convocatoria |
+| `ManualMessageIdGeneratorPort` / `RandomManualMessageIdGenerator` | Puerto / infraestructura | Identidad sintética para una convocatoria sin correo de origen |
+| `ConvocatoriaAuditLogPort` / `InMemory`·`MongoConvocatoriaAuditLog` | Puerto / infraestructura | Auditoría append-only de publicaciones y retiros |
+| `PublishConvocatoria`, `WithdrawConvocatoria` | Aplicación | Casos de uso (criterios 1-6) |
+| `NotificationSchedulingPort.cancelScheduledNotifications` | Puerto (classification, extendido) | Cancelación de avisos ante un retiro |
+| `GetConvocatoriaDetail` (`withdrawn`, `withdrawnAt`) | Aplicación (HU-15, extendido) | Señal explícita de retiro en el detalle |
+| `GetSegmentedFeed` (exclusión por `withdrawnAt`) | Aplicación (feed, extendido) | Exclusión del feed |
+
+### Criterios de aceptación y pruebas (HU-50)
+
+| Criterio | Descripción | Prueba correspondiente |
+|---|---|---|
+| 1 | El administrador crea una convocatoria con los mismos campos que produce el proceso automático | `tests/ingestion/PublishConvocatoria.test.ts` (`criterio 1: ...`) |
+| 2 | Una convocatoria manual publicada entra al mismo flujo de segmentación y notificación que una ingerida | `tests/ingestion/PublishConvocatoria.test.ts` (`criterio 2: ...`) |
+| 3 | Una convocatoria retirada deja de ser visible en la siguiente sincronización | `tests/ingestion/WithdrawConvocatoria.test.ts` (`criterio 3: ...`), `tests/feed/ConvocatoriaWithdrawnExclusion.test.ts` |
+| 4 | Los avisos programados pendientes de una convocatoria retirada se cancelan | `tests/ingestion/WithdrawConvocatoria.test.ts` (`criterio 4: ...`) |
+| 5 | Un estudiante que abre una convocatoria retirada que tenía guardada recibe aviso explícito, no contenido roto | `tests/application/GetConvocatoriaDetail.test.ts` (`HU-50, criterio 5: ...`) |
+| 6 | Toda publicación o retiro queda auditado con usuario, acción, objeto afectado y marca de tiempo | `tests/ingestion/PublishConvocatoria.test.ts` (`criterio 6: ...`), `tests/ingestion/WithdrawConvocatoria.test.ts` (`criterio 6: ...`), `tests/infrastructure/mongo/MongoConvocatoriaAuditLog.integration.test.ts` |
+| — | Retirar una convocatoria ya retirada se rechaza explícitamente (no es un no-op silencioso) | `tests/ingestion/WithdrawConvocatoria.test.ts` |
+| — | Un reenvío no revierte un retiro | Documentado arriba; cubierto indirectamente por `IngestInstitutionalMessages` conservando `existing.withdrawnAt` |
+| — | Persistencia real de `withdrawnAt` y del log de auditoría | `tests/infrastructure/mongo/MongoConsolidatedMessageRegistry.integration.test.ts`, `tests/infrastructure/mongo/MongoConvocatoriaAuditLog.integration.test.ts` |
+| — | Dominio desacoplado de infraestructura | `npm run check:architecture` |
+| — | Operaciones declaradas en el catálogo de roles | `npm run check:authorization` |
+
+## HU-53 — Verificación del aislamiento del dominio (RNF-41, RNF-42)
+
+Esta historia exige que el aislamiento del dominio sea demostrable mediante
+análisis estático y que sustituir adaptadores no requiera tocar `domain/` ni
+`application/`.
+
+Qué existe hoy y cómo se verifica:
+
+- **Análisis estático**: el script `scripts/check-architecture.mjs` verifica
+  que `src/contexts/ingestion/domain/` no importe dependencias de
+  infraestructura (por ejemplo `mongodb`, `express` o rutas `infrastructure/`).
+- **Prueba automatizada**: `tests/infrastructure/check-architecture.test.ts`
+  crea un fixture intencional que viola la regla y comprueba que el script
+  detecta la violación (lo que hace que la comprobación falle con código de
+  salida distinto de cero). Esto satisface la definición de terminado de
+  HU-53.
+
+Puertos declarados hoy (criterio 6, parcial)
+
+| Puerto | Implementación real | Doble en memoria |
+|---|---:|---:|
+| `MailboxIngestionPort` | `src/contexts/ingestion/infrastructure/adapters/out/memory/InMemoryMailboxAdapter.ts` | `InMemoryMailboxAdapter` (mismo archivo) |
+| `ProcessedMessageRegistryPort` | `src/contexts/ingestion/infrastructure/adapters/out/mongo/MongoProcessedMessageRegistry.ts` | no aplica (se usan dobles en tests) |
+| `IngestionCursorRepositoryPort` | `src/contexts/ingestion/infrastructure/adapters/out/mongo/MongoIngestionCursorRepository.ts` | no aplica |
+| `IngestionRunLogRepositoryPort` | `src/contexts/ingestion/infrastructure/adapters/out/mongo/MongoIngestionRunLogRepository.ts` | no aplica |
+
+Nota: la historia original lista puertos para clasificación, moderación,
+notificaciones, cartografía, identidad y chatbot. Esos contextos/puertos **no
+existen** todavía en este repositorio; por tanto no los he declarado ni
+implementado aquí. Cuando aparezcan los contextos correspondientes se
+documentarán e implementarán adaptadores reales y dobles en memoria siguiendo
+el mismo patrón.
+
+Sustituibilidad de adaptadores (criterios 3 y 4)
+
+- Sustituir `MongoProcessedMessageRegistry` por otro motor de persistencia
+  (por ejemplo un adaptador distinto) no requiere cambios en `domain/` ni
+  `application/` porque el caso de uso y las entidades dependen sólo del
+  puerto (`ProcessedMessageRegistryPort`). La regla de dependencia (RNF-41)
+  junto con los puertos asegura este desacoplamiento.
+
+Trazabilidad: RNF-41, RNF-42 — ver `scripts/check-architecture.mjs` y
+`tests/infrastructure/check-architecture.test.ts`.
+
+## Pruebas unitarias vs. de integración
+
+`tests/domain/`, `tests/application/` y la parte en memoria de `tests/infrastructure/` prueban el dominio y el caso de uso con dobles escritos a mano — rápidas, sin red, sin base de datos. `tests/infrastructure/mongo/*.integration.test.ts` prueban los tres adaptadores de MongoDB **contra una instancia real** (no un mock del driver), porque lo que hay que verificar ahí es justamente que el filtro, el `upsert` y el índice declarado funcionan de verdad contra el motor real. Ver el README raíz para levantar esa instancia.
+
+## Nota sobre el buzon institucional
+
+Mientras la Universidad habilita el buzon recolector (riesgo R-01 del Plan Integrado),
+`main.ts` compone el caso de uso con `InMemoryMailboxAdapter` alimentado por un corpus
+de mensajes anonimizados. Sustituirlo por `ImapMailboxAdapter` es un cambio de una linea
+en la raiz de composicion, sin tocar dominio ni casos de uso.
+
+## HU-54 — Cobertura de pruebas y dobles para fallas externas
+
+Este repositorio ha sido verificado contra los criterios verificables de la
+Historia HU-54. Resumen de lo realizado y decisiones tomadas:
+
+- **Criterio 1 (umbral de cobertura ≥ 80% sobre dominio y casos de uso)**:
+  - Verificado por `npm run test:coverage` (Vitest + V8). La cobertura sobre
+    `src/contexts/**/domain/**` y `src/contexts/**/application/**` es actualmente
+    ≥ 80% (informalmente: ~97%). Los archivos de prueba que verifican esto son:
+    `tests/domain/*` y `tests/application/*` (ver sección "Pruebas" abajo).
+- **Criterio 2 (fallo del pipeline si baja cobertura)**:
+  - Se satisface usando la configuración de Vitest: `config/vitest.config.ts`
+    define `coverage.thresholds` que hace que `vitest run --coverage` devuelva
+    error si las métricas bajan. Este comportamiento es el usado por CI
+    (`.github/workflows/ci.yml`) y por tanto no se añadió una prueba adicional
+    para forzar la violación. (Decisión: confiar en el mecanismo nativo de
+    Vitest+CI en lugar de introducir una prueba artificial que manipule la
+    ejecución de la herramienta.)
+- **Criterio 3 (doble de buzón: reintento con backoff, conservación del cursor)**:
+  - Las pruebas que cubren reintentos, backoff y aislamiento del dominio son:
+    `tests/infrastructure/resilience/RetryingMailboxAdapter.test.ts`,
+    `tests/infrastructure/resilience/CircuitBreakerMailboxAdapter.test.ts` y
+    `tests/application/IngestInstitutionalMessages.test.ts`.
+    Estas ejercitan el flujo en memoria usando `InMemoryMailboxAdapter` y
+    comprobando conservación del `IngestionCursor` y la bitácora de ejecución.
+    Nota: la verificación de "ausencia de errores visibles para el estudiante"
+    corresponde a la capa de presentación (feed/API) y no existe en este
+    repositorio — por tanto se documenta como limitación, no como incumplida.
+- **Criterio 6 (mensajes con formato inesperado terminan en cuarentena)**:
+  - Implementado por HU-04 (ver sección propia más abajo): el mensaje se
+    persiste con su causa y contenido crudo vía `QuarantineRepositoryPort`, no
+    solo se contabiliza. Sigue sin avanzar el `IngestionCursor` para ese UID
+    (puede volver a reportarse en ejecuciones posteriores), porque excluirlo
+    de futuros fetches requiere un punto de entrada de reprocesamiento
+    (criterio 5 de HU-04) que a su vez depende de la capa HTTP que el backend
+    todavía no tiene — ver la nota al final de la sección HU-04.
+- **Criterio 7 (dobles en memoria para pruebas de casos de uso)**:
+  - Confirmado: todas las pruebas bajo `tests/domain/` y `tests/application/`
+    corren contra dobles en memoria y no requieren red ni base de datos. Las
+    pruebas de integración que sí requieren Mongo están en
+    `tests/infrastructure/mongo/*.integration.test.ts` y requieren una instancia
+    real de MongoDB.
+
+### Archivos y pruebas relevantes
+
+- `tests/application/IngestInstitutionalMessages.test.ts` — casos de uso raíz,
+  reintentos y conservación de cursor.
+- `tests/domain/*` — pruebas unitarias de `MessageId`, `IngestionCursor`,
+  `IdempotencyPolicy`.
+- `tests/infrastructure/resilience/*` — reintento con backoff y circuito.
+
+## Nota sobre los criterios 4 y 5 (clasificación y moderación)
+
+Los criterios relativos al "servicio de clasificación" y al "servicio de
+moderación" (criterios 4 y 5 en la HU-54) asumen que existen contextos,
+puertos y adaptadores para `classification` y `moderation`. `classification`
+existe desde HU-06. **Actualización:** un contexto `moderation` también
+existe desde HU-49, pero es el panel administrativo de revisión de cuarentena
+y documentos pendientes — no el "servicio de moderación" (automático, sobre
+contenido del foro) al que esta nota original se refería. Ese servicio
+automático sigue sin existir; si se construye, las mismas pautas de diseño
+de esta historia (puertos y dobles en memoria, pruebas de indisponibilidad y
+colas de reintento/retención) siguen aplicando.
+
+Trazabilidad para HU-54: RNF-43, RNF-44, RNF-10, RNF-11, RNF-12. Entregable 1 del Project Charter
