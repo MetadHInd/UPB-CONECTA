@@ -22,6 +22,9 @@ import { RefreshSession } from './contexts/identity/application/RefreshSession.j
 import { LogoutSession } from './contexts/identity/application/LogoutSession.js';
 import { VerifyAccessToken } from './contexts/identity/application/VerifyAccessToken.js';
 import { ConsoleSecurityAuditLog } from './contexts/identity/infrastructure/adapters/out/console/ConsoleSecurityAuditLog.js';
+import { NotificationsDeviceInvalidationAdapter } from './contexts/identity/infrastructure/adapters/out/device/NotificationsDeviceInvalidationAdapter.js';
+import { InvalidateDevice } from './contexts/notifications/application/InvalidateDevice.js';
+import { MongoDeviceRegistry } from './contexts/notifications/infrastructure/adapters/out/mongo/MongoDeviceRegistry.js';
 
 import { StartConversation } from './contexts/messaging/application/StartConversation.js';
 import { SendMessage } from './contexts/messaging/application/SendMessage.js';
@@ -148,9 +151,16 @@ async function bootstrap(): Promise<void> {
     accountRoles
   });
 
+  // HU-39, criterio 2: al cerrar sesion se da de baja el dispositivo de esa cuenta.
+  const deviceRegistry = new MongoDeviceRegistry(db);
+  const deviceInvalidation = new NotificationsDeviceInvalidationAdapter(
+    deviceRegistry,
+    new InvalidateDevice({ registry: deviceRegistry, clock })
+  );
+
   const authRouter = createAuthRouter(authenticateStudent, {
     refresh: new RefreshSession({ signer, refreshTokens, audit: securityAudit, clock, sessions: sessionTokenIssuer }),
-    logout: new LogoutSession({ signer, refreshTokens, audit: securityAudit, clock })
+    logout: new LogoutSession({ signer, refreshTokens, audit: securityAudit, clock, devices: deviceInvalidation })
   });
   const sessionGuard = requireSession(new VerifyAccessToken({ signer, refreshTokens, audit: securityAudit, clock }));
 

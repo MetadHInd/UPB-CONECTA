@@ -44,7 +44,13 @@ export function createAuthRouter(
       void (async () => {
         const refreshToken = readRefreshToken(req, res);
         if (refreshToken === null) return;
-        const result = await sessions.logout.execute({ refreshToken, origin: req.ip ?? 'unknown' });
+        // HU-39, criterio 2: `deviceToken` opcional para dar de baja el dispositivo.
+        const deviceToken = (req.body as Record<string, unknown> | null | undefined)?.['deviceToken'];
+        const result = await sessions.logout.execute({
+          refreshToken,
+          origin: req.ip ?? 'unknown',
+          ...(typeof deviceToken === 'string' && deviceToken.trim() !== '' ? { deviceToken: deviceToken.trim() } : {})
+        });
         res.status(result.ok ? 200 : 401).json(result);
       })().catch(next);
     });
