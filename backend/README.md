@@ -118,15 +118,56 @@ npm install
 npm run typecheck            # TypeScript estricto
 npm run check:architecture   # RNF-41: el dominio no puede importar infraestructura
 npm run check:authorization  # HU-46: toda operacion administrativa declara su rol requerido
-npm test                     # 767 pruebas (requiere MongoDB corriendo)
+npm test                     # suite completa (requiere MongoDB corriendo)
 npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 npm run build                # compila a dist/
-npm run start:http           # servidor HTTP (POST /auth/login) — requiere build previo y MongoDB corriendo
+npm run start:http           # API HTTP (auth, mensajería, /health, /ready) — requiere build previo y MongoDB
+npm run start:worker         # planificadores de ingesta y avisos de vencimiento — requiere build previo y MongoDB
+# En local, `dev:http` y `dev:worker` hacen lo mismo leyendo el archivo .env
 ```
 
 `start:http` arranca `src/http-server.ts`: el servidor Express que expone el contrato REST que consume `Frontend/` (hoy solo `POST /auth/login` — ver `src/contexts/identity/README.md`, sección "Adaptador de entrada HTTP"). Es un proceso independiente de `main.ts` (que arranca los planificadores de ingesta/avisos): pueden correr a la vez o por separado.
 
 Si MongoDB no está disponible, `npm test` falla de entrada con un mensaje explícito (`tests/setup/ensureMongoAvailable.ts`) en lugar de colgarse o fallar de forma críptica en cada archivo.
+
+## Despliegue en Railway (varias instancias)
+
+El sistema corre como **tres servicios** de un mismo proyecto de Railway, sobre una red privada. Solo la API tiene dominio público:
+
+```
+ Internet ──TLS──▶ borde de Railway ──▶ api (N réplicas, dominio público)
+                                           │
+                       red privada         ├──▶ mongodb (sin proxy TCP público, volumen persistente)
+                    (*.railway.internal)   │
+                                      worker (1 réplica, sin dominio público) ──▶ mongodb
+```
+
+| Servicio | Qué ejecuta | Réplicas | Config |
+|---|---|---|---|
+| `api` | `npm run start:http` (`src/http-server.ts`): login, refresh, logout, mensajería, `/health`, `/ready` | 2 o más | `backend/railway.api.json` |
+| `worker` | `npm run start:worker` (`src/main.ts`): ingesta del buzón y avisos de vencimiento | 1 | `backend/railway.worker.json` |
+| `mongodb` | Plantilla de MongoDB de Railway | 1 | — |
+
+En cada servicio de aplicación: *Root Directory* = `backend` y *Config-as-code file path* = `/backend/railway.api.json` o `/backend/railway.worker.json`. El comando de build y el de arranque, el healthcheck (`/ready`) y el número de réplicas quedan versionados en esos archivos.
+
+**Qué hace seguro tener varias réplicas**
+
+- El estado compartido vive en MongoDB: sesiones y refresh tokens, consentimiento, mensajería y el **limitador de intentos de login** (`MongoRateLimiter`), de modo que el límite de RNF-16 vale entre todas las réplicas. El origen del límite es la IP real del cliente (`trust proxy` detrás del borde de Railway).
+- Los planificadores del `worker` toman un arrendamiento en MongoDB (`MongoLease`, colección `scheduler_leases`) en cada ciclo: aunque haya dos workers o un reinicio con solape, un ciclo no corre dos veces a la vez. Si el titular muere, el arrendamiento vence solo.
+- `/health` es *liveness* (el proceso responde); `/ready` es *readiness* (MongoDB responde y la réplica no se está apagando). Con `SIGTERM`, `/ready` pasa a 503, la réplica espera `SHUTDOWN_GRACE_MS` (3 s) para que el balanceador la retire, termina las peticiones en vuelo y cierra MongoDB.
+- Cada respuesta lleva `X-Instance` con el id de la réplica (`RAILWAY_REPLICA_ID`), útil para comprobar el balanceo.
+
+**Variables de entorno** (ver `.env.example` para la lista completa)
+
+| Variable | Servicios | Valor |
+|---|---|---|
+| `MONGODB_URI` | api, worker | Referencia al servicio de MongoDB por la red privada, p. ej. `${{mongodb.MONGO_URL}}` |
+| `MONGODB_DATABASE` | api, worker | `upb_conecta` |
+| `SESSION_SIGNING_SECRET` | api | Mínimo 32 caracteres y **el mismo en todas las réplicas** (variable compartida del entorno) |
+| `IDENTITY_SEED_TEST_USERS` | api | `true` solo en local o staging. **No definir en producción**: las cuentas de prueba comparten una contraseña pública |
+| `SHUTDOWN_GRACE_MS` | api | Opcional, 3000 por defecto |
+
+Nota sobre la red privada: los entornos de Railway creados antes del 16-oct-2025 resuelven `*.railway.internal` solo por IPv6; los nuevos, por IPv4 e IPv6.
 
 ## Estrategia de pruebas: por qué hay dos tipos
 
