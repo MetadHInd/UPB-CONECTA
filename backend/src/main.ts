@@ -61,6 +61,7 @@ async function bootstrap(): Promise<void> {
   await MongoPostProcessingRuleRepository.ensureIndexes(db);
   await MongoEmittedReminderRegistry.ensureIndexes(db);
   await MongoLease.ensureIndexes(db);
+  await MongoProgramTargetingRepository.ensureIndexes(db);
   await MongoPracticeApplicationTrackingRepository.ensureIndexes(db);
 
   const clock = new SystemClock();

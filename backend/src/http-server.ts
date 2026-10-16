@@ -80,6 +80,7 @@ async function bootstrap(): Promise<void> {
   await MongoConsentRepository.ensureIndexes(db);
   await MongoConversationRepository.ensureIndexes(db);
   await MongoRateLimiter.ensureIndexes(db);
+  await MongoDeviceRegistry.ensureIndexes(db);
 
   const clock = new SystemClock();
   const sessionConfig = readSessionConfig();
