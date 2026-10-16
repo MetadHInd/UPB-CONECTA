@@ -109,7 +109,7 @@ mongosh --eval "db.runCommand({ping:1})"
 cp .env.example .env
 ```
 
-`INGESTION_INTERVAL_MS` y `INGESTION_BATCH_SIZE` controlan el planificador (RF-01, criterio 2: la frecuencia es parametrizable sin recompilar). `MAILBOX_*` son las credenciales del buzón IMAP real (todavía no habilitado por la Universidad — ver la nota en el README del contexto de ingesta). `MONGODB_URI` y `MONGODB_DATABASE` apuntan a la instancia local.
+`INGESTION_INTERVAL_MS` y `INGESTION_BATCH_SIZE` controlan el planificador (RF-01, criterio 2: la frecuencia es parametrizable sin recompilar). `MAILBOX_*` son las credenciales del buzón IMAP real (todavía no habilitado por la Universidad — ver la nota en el README del contexto de ingesta). `MONGODB_URI` y `MONGODB_DATABASE` apuntan a la instancia local. `SESSION_*`, `IDENTITY_RATE_LIMIT_*`, `PROFILE_SEMESTER_MAX` y `HTTP_PORT` configuran el servidor HTTP (ver más abajo) — `SESSION_SIGNING_SECRET` es obligatorio y debe generarse propio, nunca reutilizar el placeholder del `.env.example`.
 
 ### 3. Instalar y correr
 
@@ -121,7 +121,10 @@ npm run check:authorization  # HU-46: toda operacion administrativa declara su r
 npm test                     # 767 pruebas (requiere MongoDB corriendo)
 npm run test:coverage        # umbral del 80% sobre dominio y casos de uso
 npm run build                # compila a dist/
+npm run start:http           # servidor HTTP (POST /auth/login) — requiere build previo y MongoDB corriendo
 ```
+
+`start:http` arranca `src/http-server.ts`: el servidor Express que expone el contrato REST que consume `Frontend/` (hoy solo `POST /auth/login` — ver `src/contexts/identity/README.md`, sección "Adaptador de entrada HTTP"). Es un proceso independiente de `main.ts` (que arranca los planificadores de ingesta/avisos): pueden correr a la vez o por separado.
 
 Si MongoDB no está disponible, `npm test` falla de entrada con un mensaje explícito (`tests/setup/ensureMongoAvailable.ts`) en lugar de colgarse o fallar de forma críptica en cada archivo.
 

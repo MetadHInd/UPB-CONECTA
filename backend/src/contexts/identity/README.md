@@ -49,12 +49,29 @@ Desde HU-30, el foro también necesita los datos del directorio en cada login. `
 
 ### Infraestructura
 
-- `InMemoryIdentityProviderAdapter`: adaptación local para pruebas y entorno sin proveedor externo real.
+- `MongoIdentityProviderAdapter`: directorio de cuentas en MongoDB (colección `identity_users`, contraseña con `scrypt` + sal, nunca en claro). Es el que usa `http-server.ts` mientras no exista el directorio real.
+- `InMemoryIdentityProviderAdapter`: adaptación local para pruebas.
 - `RealIdentityProviderAdapter`: adaptador que falla explícitamente hasta que exista configuración real del directorio institucional.
 - `InMemoryRateLimiter`: limitador en memoria con ventana configurable por variables de entorno.
 - `ConsentStatusAdapter` (HU-44): implementa `ConsentStatusPort` llamando a `RequireConsentToProceed` del contexto `consent`.
 
+## Cuentas en MongoDB y rol en el login
+
+- Roles: `student`, `professor` y `content-admin`, con jerarquía estudiante < profesor < administrador (`AuthorizationPolicy`).
+- Al arrancar, `http-server.ts` crea (si no existen) las cuentas de prueba de `infrastructure/seed/TestAccountSeeder.ts`: 10 estudiantes y 3 profesores (`profesor@upb.edu.co`, `patricia.suarez@upb.edu.co`, `jorge.navarro@upb.edu.co`), todos con contraseña `S3cr3t!UPB`, con su rol en `identity_account_roles`. Se desactiva con `IDENTITY_SEED_TEST_USERS=false`. Nunca sobrescribe una cuenta existente ni cambia un rol ya asignado.
+- Un profesor no tiene semestre: su login sincroniza el autor del foro, pero no crea perfil de segmentación de estudiante.
+- Crear otra cuenta: `npm run build && npm run user:create -- --email juan.perez@upb.edu.co --password 'Clave123!' --name 'Juan Pérez' --program 'Ingeniería de Sistemas' --semester 4 --student-id 2024-0100`. Para un profesor: `--role professor` y sin `--semester`. Con `--role` sobre una cuenta existente, el cambio de rol queda auditado (`ChangeAccountRole`). En Railway: `railway run npm run user:create -- ...`.
+- `POST /auth/login` devuelve `role` (`student`, `professor` o `content-admin`), leído fresco de `AccountRoleRepositoryPort` en cada login; sin registro, `student`.
+
+## Sesión por HTTP
+
+- `POST /auth/refresh` `{ refreshToken }` → `{ ok, session }` con un par nuevo (rotación: el refresh token usado no sirve otra vez).
+- `POST /auth/logout` `{ refreshToken }` → revoca la cadena; el access token deja de servir de inmediato.
+- `requireSession` (`infrastructure/http/requireSession.ts`) protege los endpoints autenticados con `Authorization: Bearer <accessToken>`. Los rechazos de token se registran con `ConsoleSecurityAuditLog` (Deploy Logs de Railway).
+
 ## Variables de entorno soportadas
+
+- `IDENTITY_SEED_TEST_USERS`: `false` desactiva la creación de cuentas de prueba al arrancar.
 
 - `IDENTITY_RATE_LIMIT_WINDOW_MS`: duración de la ventana para contar fallidos.
 - `IDENTITY_RATE_LIMIT_MAX_PER_ACCOUNT`: máximo de intentos fallidos por cuenta.
@@ -279,6 +296,26 @@ Reutiliza HU-45 (cadena de refresh tokens, `LogoutSession`, `VerifyAccessToken`)
 - **Cliente Android (Room):** `Frontend/` solo usa datos simulados (`MockData.kt`) y no tiene base local ni cliente HTTP; no hay nada que purgar. Se implementó el puerto (`LocalDataPurgePort`) y dobles en memoria; el adaptador Room, la cola persistente y el disparo del reintento al recuperar conexión quedan para la historia del cliente (criterio 3 del lado móvil).
 - **Capa HTTP:** `RemoteSessionClosurePort` se prueba con `InProcessRemoteSessionClosure`; el cliente real llamará a `POST /session/logout`.
 
+## Adaptador de entrada HTTP: `POST /auth/login`
+
+Primer endpoint del contrato REST que consume el `Frontend/` (ver
+`Frontend/ARQUITECTURA-INTEGRACION.md`). Vive en
+`infrastructure/http/authRoutes.ts` — un adaptador de entrada más, simétrico
+a los adaptadores de salida (`mongo/`, `jwt/`, `memory/`) que ya tenía este
+contexto: llama a `AuthenticateStudent.execute(...)` y traduce su resultado
+(unión discriminada `AuthenticationResult`) a código de estado + JSON —
+`401` credenciales inválidas, `429` rate limiting, `503` proveedor no
+disponible, `200` éxito con `{ profile, session, consent }`. La composición
+completa (Mongo real para sesiones/perfil/foro/consentimiento,
+`FanOutProfileSync` hacia `profile` y `forum`) vive en `src/http-server.ts`,
+la raíz de composición del servidor HTTP — separada de `main.ts`, que solo
+arranca los planificadores de ingesta/avisos.
+
+`POST /auth/login` devuelve además `role` (`student`, `professor` o `content-admin`); ver
+"Cuentas en MongoDB y rol en el login" más arriba. Las rutas de refresh y cierre de sesión
+(`/auth/refresh`, `/auth/logout`) comparten el mismo adaptador HTTP.
+
 ## HU-40: descartar el contexto del chatbot al cerrar la sesión
 
 `LogoutSession` recibe un `SessionEndedPort` opcional y lo invoca con el `sessionId` (la cadena) después de revocarla. Lo implementa `ChatbotConversationSessionEndedAdapter`, que descarta la conversación del chatbot de esa sesión (`EndChatbotConversation`). Es idempotente, como el resto del cierre. Ver `src/contexts/chatbot/README.md`, sección HU-40.
+

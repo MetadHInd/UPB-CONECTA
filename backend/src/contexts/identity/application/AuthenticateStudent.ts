@@ -2,6 +2,8 @@ import type { IdentityCredentials, IdentityProfile, IdentityProviderPort } from 
 import type { AuthenticatedProfileSyncPort } from '../domain/ports/out/AuthenticatedProfileSyncPort.js';
 import type { RateLimiterPort } from '../domain/ports/out/RateLimiterPort.js';
 import type { ConsentStatusPort } from '../domain/ports/out/ConsentStatusPort.js';
+import type { AccountRoleRepositoryPort } from '../domain/ports/out/AccountRoleRepositoryPort.js';
+import { Role } from '../domain/value-objects/Role.js';
 import { AuthenticationFailureKind, type AuthenticationResult } from '../domain/entities/AuthenticationResult.js';
 import type { SessionTokenIssuer } from './SessionTokenIssuer.js';
 
@@ -29,6 +31,11 @@ export class AuthenticateStudent {
       readonly sessions: SessionTokenIssuer;
       readonly profileSync: AuthenticatedProfileSyncPort;
       readonly consentStatus: ConsentStatusPort;
+      /**
+       * HU-46: de donde se lee el rol que viaja en la respuesta. Opcional:
+       * sin repositorio toda cuenta es `Role.STUDENT`, igual que sin registro.
+       */
+      readonly accountRoles?: AccountRoleRepositoryPort;
     }
   ) {}
 
@@ -78,9 +85,12 @@ export class AuthenticateStudent {
     // fresco en cada login, nunca cacheado — mismo principio que HU-46 aplica
     // al rol de la cuenta.
     const consent = await this.dependencies.consentStatus.getRequirement(profile.email);
+    const roleRecord = await this.dependencies.accountRoles?.findBySubject(profile.email);
+    const role = roleRecord?.role ?? Role.STUDENT;
     return {
       ok: true,
       profile,
+      role,
       message: 'Autenticación correcta.',
       session,
       consent

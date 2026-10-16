@@ -81,7 +81,9 @@ export function buildProfileHarness(options: { readonly profiles?: StudentProfil
     async login() {
       const result = await identity.authenticate.execute({ ...STUDENT, origin: '10.0.0.1' });
       if (!result.ok) throw new Error(`login fallido: ${result.message}`);
-      return result;
+      const { semester } = result.profile;
+      if (semester === undefined) throw new Error('el estudiante de prueba debe traer semestre');
+      return { ...result, profile: { ...result.profile, semester } };
     },
     changeDirectory(profile: Partial<typeof DIRECTORY_PROFILE>) {
       identity.provider.register({ ...STUDENT, profile: { ...DIRECTORY_PROFILE, ...profile } });

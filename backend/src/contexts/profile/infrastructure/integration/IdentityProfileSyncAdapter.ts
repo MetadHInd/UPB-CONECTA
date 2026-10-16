@@ -6,11 +6,15 @@ import type { SyncStudentProfileFromDirectory } from '../../application/SyncStud
  * Conecta el puerto de salida de `identity` con el caso de uso de `profile`.
  * Copia campo a campo: `studentId` y cualquier dato futuro del directorio no
  * cruzan al perfil (HU-37 criterio 6).
+ *
+ * El perfil de segmentacion (programa + semestre) es solo de estudiantes: si
+ * el directorio no trae semestre (un profesor), no hay perfil que crear.
  */
 export class IdentityProfileSyncAdapter implements AuthenticatedProfileSyncPort {
   constructor(private readonly sync: SyncStudentProfileFromDirectory) {}
 
   async syncFromDirectory(profile: IdentityProfile): Promise<void> {
+    if (profile.semester === undefined) return;
     await this.sync.execute({
       name: profile.name,
       email: profile.email,

@@ -20,4 +20,15 @@ describe('AuthorizationPolicy (HU-46, criterios 1 y 2)', () => {
   it('un estudiante puede hacer lo que requiere el rol de estudiante', () => {
     expect(authorize(Role.STUDENT, Role.STUDENT)).toEqual({ allowed: true });
   });
+
+  it('un profesor puede lo que puede un estudiante, pero no lo de un administrador de contenido', () => {
+    expect(authorize(Role.PROFESSOR, Role.STUDENT)).toEqual({ allowed: true });
+    expect(authorize(Role.PROFESSOR, Role.PROFESSOR)).toEqual({ allowed: true });
+    expect(authorize(Role.PROFESSOR, Role.CONTENT_ADMIN).allowed).toBe(false);
+  });
+
+  it('un estudiante no puede lo que requiere el rol de profesor; un administrador si', () => {
+    expect(authorize(Role.STUDENT, Role.PROFESSOR).allowed).toBe(false);
+    expect(authorize(Role.CONTENT_ADMIN, Role.PROFESSOR)).toEqual({ allowed: true });
+  });
 });

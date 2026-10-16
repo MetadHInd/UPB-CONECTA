@@ -3,16 +3,17 @@ import { Role } from '../value-objects/Role.js';
 export type AuthorizationDecision = { readonly allowed: true } | { readonly allowed: false; readonly reason: string };
 
 /**
- * Jerarquia minima, no una matriz de permisos: la historia solo pide
- * distinguir dos roles (criterio 4), y un administrador de contenido sigue
- * siendo una cuenta autenticada — puede hacer todo lo que un estudiante
- * puede. Si en el futuro aparece un tercer rol sin esa relacion de
- * contencion, esto deja de alcanzar y hay que modelar permisos explicitos
- * por operacion en vez de un rango total.
+ * Jerarquia total, no una matriz de permisos: estudiante < profesor <
+ * administrador de contenido. Un profesor puede todo lo que puede un
+ * estudiante, y un administrador todo lo que puede un profesor. Si en el
+ * futuro aparece un rol sin esa relacion de contencion, esto deja de
+ * alcanzar y hay que modelar permisos explicitos por operacion en vez de un
+ * rango total.
  */
 const ROLE_RANK: Readonly<Record<Role, number>> = {
   [Role.STUDENT]: 0,
-  [Role.CONTENT_ADMIN]: 1
+  [Role.PROFESSOR]: 1,
+  [Role.CONTENT_ADMIN]: 2
 };
 
 /**
