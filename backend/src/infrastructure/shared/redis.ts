@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { createClient } from 'redis';
 
 /** Cliente de Redis ya conectado, o `null` si no se configuro `REDIS_URL`. */
@@ -24,7 +25,7 @@ export async function connectRedis(url: string | undefined, log: (message: strin
     disableOfflineQueue: true,
     socket: {
       connectTimeout: 2000,
-      reconnectStrategy: (retries) => Math.min(2 ** retries * 100, 5000) + Math.floor(Math.random() * 200)
+      reconnectStrategy: (retries) => Math.min(2 ** retries * 100, 5000) + randomInt(0, 200)
     }
   });
   client.on('error', (error: Error) => log(`[redis] ${error.message}`));
