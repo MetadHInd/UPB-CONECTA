@@ -203,18 +203,23 @@ async function bootstrap(): Promise<void> {
     console.log(`[http] escuchando en el puerto ${port}`);
   });
 
-  // Apagado ordenado (RNF-12): primero /ready pasa a 503 para que el
-  // balanceador deje de enviar trafico, luego se terminan las peticiones en
-  // vuelo y por ultimo se cierra MongoDB. Tope de 10 s por si algo no termina.
+  // Apagado ordenado (RNF-12): al recibir la senal /ready pasa a 503 y se
+  // espera un margen (SHUTDOWN_GRACE_MS, 3 s por defecto) para que el
+  // balanceador retire esta replica antes de cerrar el puerto; despues se
+  // terminan las peticiones en vuelo y por ultimo se cierra MongoDB. Tope
+  // duro de 15 s por si algo no termina.
+  const graceMs = Number(process.env['SHUTDOWN_GRACE_MS'] ?? 3000);
   const shutdown = (signal: string): void => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`[http] ${signal}: apagando`);
-    setTimeout(() => process.exit(1), 10_000).unref();
-    server.close(() => {
-      void client.close().finally(() => process.exit(0));
-    });
-    server.closeIdleConnections();
+    console.log(`[http] ${signal}: apagando (margen ${graceMs} ms)`);
+    setTimeout(() => process.exit(1), graceMs + 12_000).unref();
+    setTimeout(() => {
+      server.close(() => {
+        void client.close().finally(() => process.exit(0));
+      });
+      server.closeIdleConnections();
+    }, graceMs);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
