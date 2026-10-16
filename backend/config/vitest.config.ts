@@ -9,7 +9,7 @@ export default defineConfig({
   root: projectRoot,
   test: {
     include: ['tests/**/*.test.ts'],
-    globalSetup: ['tests/setup/ensureMongoAvailable.ts'],
+    globalSetup: ['tests/setup/ensureMongoAvailable.ts', 'tests/setup/ensureRedisAvailable.ts'],
     coverage: {
       provider: 'v8',
       include: [

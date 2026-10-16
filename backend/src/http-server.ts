@@ -11,6 +11,10 @@ import { MongoIdentityProviderAdapter } from './contexts/identity/infrastructure
 import { MongoAccountRoleRepository } from './contexts/identity/infrastructure/adapters/out/mongo/MongoAccountRoleRepository.js';
 import { seedTestAccounts } from './contexts/identity/infrastructure/seed/TestAccountSeeder.js';
 import { MongoRateLimiter } from './contexts/identity/infrastructure/adapters/out/mongo/MongoRateLimiter.js';
+import { RedisRateLimiter } from './contexts/identity/infrastructure/adapters/out/redis/RedisRateLimiter.js';
+import { FallbackRateLimiter } from './contexts/identity/infrastructure/adapters/out/FallbackRateLimiter.js';
+import { RedisCachedRefreshTokenRepository } from './contexts/identity/infrastructure/adapters/out/redis/RedisCachedRefreshTokenRepository.js';
+import { connectRedis, redisStatus } from './infrastructure/shared/redis.js';
 import { JoseTokenSigningAdapter } from './contexts/identity/infrastructure/adapters/out/jwt/JoseTokenSigningAdapter.js';
 import { RandomSessionIdGenerator } from './contexts/identity/infrastructure/adapters/out/crypto/RandomSessionIdGenerator.js';
 import { MongoRefreshTokenRepository } from './contexts/identity/infrastructure/adapters/out/mongo/MongoRefreshTokenRepository.js';
@@ -118,7 +122,11 @@ async function bootstrap(): Promise<void> {
   );
 
   const signer = new JoseTokenSigningAdapter(sessionConfig, clock);
-  const refreshTokens = new MongoRefreshTokenRepository(db);
+  // Redis es opcional (cache compartida entre replicas): sin REDIS_URL, o si
+  // cae en marcha, todo funciona sobre MongoDB como antes.
+  const redis = await connectRedis(process.env['REDIS_URL']);
+  const mongoRefreshTokens = new MongoRefreshTokenRepository(db);
+  const refreshTokens = redis === null ? mongoRefreshTokens : new RedisCachedRefreshTokenRepository(mongoRefreshTokens, redis);
   const securityAudit = new ConsoleSecurityAuditLog();
   const sessionTokenIssuer = new SessionTokenIssuer({
     signer,
@@ -146,10 +154,14 @@ async function bootstrap(): Promise<void> {
     console.log(`[http] cuentas de prueba: ${seeded.created.length} creadas, ${seeded.existing.length} ya existian`);
   }
 
+  const mongoRateLimiter = new MongoRateLimiter(db, readIdentityRateLimitConfig());
   const authenticateStudent = new AuthenticateStudent({
     provider: identityProvider,
     // Estado compartido en MongoDB: el limite vale entre todas las replicas de la API.
-    rateLimiter: new MongoRateLimiter(db, readIdentityRateLimitConfig()),
+    rateLimiter:
+      redis === null
+        ? mongoRateLimiter
+        : new FallbackRateLimiter(new RedisRateLimiter(redis, readIdentityRateLimitConfig()), mongoRateLimiter),
     sessions: sessionTokenIssuer,
     profileSync: new FanOutProfileSync([profileSync, forumAuthorSync]),
     consentStatus,
@@ -197,6 +209,8 @@ async function bootstrap(): Promise<void> {
       ]);
       return true;
     },
+    // Redis informa su estado pero NO decide la disponibilidad: es una optimizacion con respaldo.
+    details: () => ({ redis: redisStatus(redis) }),
     instanceId: process.env['RAILWAY_REPLICA_ID'] ?? process.env['HOSTNAME'] ?? 'local'
   });
   const port = Number(process.env['PORT'] ?? process.env['HTTP_PORT'] ?? 3000);
@@ -217,6 +231,7 @@ async function bootstrap(): Promise<void> {
     setTimeout(() => process.exit(1), graceMs + 12_000).unref();
     setTimeout(() => {
       server.close(() => {
+        redis?.destroy();
         void client.close().finally(() => process.exit(0));
       });
       server.closeIdleConnections();

@@ -66,6 +66,13 @@ describe('capa HTTP para varias replicas', () => {
     expect((await get('/ready')).status).toBe(503);
   });
 
+  it('/ready anade los datos informativos sin cambiar el codigo de estado', async () => {
+    const get = await start({ isReady: async () => true, details: () => ({ redis: 'down' }) });
+    const res = await get('/ready');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, ready: true, redis: 'down' });
+  });
+
   it('devuelve la replica en X-Instance solo si se configuro', async () => {
     const withId = await start({ instanceId: 'replica-a' });
     expect((await withId('/health')).headers.get('x-instance')).toBe('replica-a');

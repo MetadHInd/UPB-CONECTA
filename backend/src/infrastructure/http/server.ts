@@ -20,6 +20,8 @@ export interface HttpServerOptions {
    * sondeo, `/ready` responde siempre 200.
    */
   readonly isReady?: () => Promise<boolean>;
+  /** Datos informativos que se anaden al cuerpo de `/ready` (no afectan al codigo de estado). */
+  readonly details?: () => Record<string, unknown>;
   /** Identificador de esta replica; se devuelve en la cabecera `X-Instance`. */
   readonly instanceId?: string;
 }
@@ -53,10 +55,10 @@ export function createHttpServer(routers: readonly Router[], options: HttpServer
     const check = options.isReady ?? (async () => true);
     check()
       .then((ready) => {
-        res.status(ready ? 200 : 503).json({ ok: ready, ready });
+        res.status(ready ? 200 : 503).json({ ok: ready, ready, ...options.details?.() });
       })
       .catch(() => {
-        res.status(503).json({ ok: false, ready: false });
+        res.status(503).json({ ok: false, ready: false, ...options.details?.() });
       });
   });
 

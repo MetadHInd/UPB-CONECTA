@@ -95,6 +95,7 @@ El proyecto usa MongoDB de verdad para correr — tanto en ejecución normal com
 brew tap mongodb/brew
 brew install mongodb-community
 brew services start mongodb-community
+brew install redis && brew services start redis   # solo para las pruebas de los adaptadores de cache
 ```
 
 Queda escuchando en `mongodb://localhost:27017`, sin autenticación (uso local de desarrollo). Verificar que responde:
@@ -138,7 +139,8 @@ El sistema corre como **tres servicios** de un mismo proyecto de Railway, sobre 
  Internet ──TLS──▶ borde de Railway ──▶ api (N réplicas, dominio público)
                                            │
                        red privada         ├──▶ mongodb (sin proxy TCP público, volumen persistente)
-                    (*.railway.internal)   │
+                    (*.railway.internal)   ├──▶ redis   (cache; sin proxy TCP público)
+                                           │
                                       worker (1 réplica, sin dominio público) ──▶ mongodb
 ```
 
@@ -147,6 +149,7 @@ El sistema corre como **tres servicios** de un mismo proyecto de Railway, sobre 
 | `api` | `npm run start:http` (`src/http-server.ts`): login, refresh, logout, mensajería, `/health`, `/ready` | 2 o más | `backend/railway.api.json` |
 | `worker` | `npm run start:worker` (`src/main.ts`): ingesta del buzón y avisos de vencimiento | 1 | `backend/railway.worker.json` |
 | `mongodb` | Plantilla de MongoDB de Railway | 1 | — |
+| `redis` | Plantilla de Redis de Railway (cache, opcional) | 1 | — |
 
 En cada servicio de aplicación: *Root Directory* = `backend` y *Config-as-code file path* = `/backend/railway.api.json` o `/backend/railway.worker.json`. El comando de build y el de arranque, el healthcheck (`/ready`) y el número de réplicas quedan versionados en esos archivos.
 
@@ -155,6 +158,7 @@ En cada servicio de aplicación: *Root Directory* = `backend` y *Config-as-code 
 - El estado compartido vive en MongoDB: sesiones y refresh tokens, consentimiento, mensajería y el **limitador de intentos de login** (`MongoRateLimiter`), de modo que el límite de RNF-16 vale entre todas las réplicas. El origen del límite es la IP real del cliente (`trust proxy` detrás del borde de Railway).
 - Los planificadores del `worker` toman un arrendamiento en MongoDB (`MongoLease`, colección `scheduler_leases`) en cada ciclo: aunque haya dos workers o un reinicio con solape, un ciclo no corre dos veces a la vez. Si el titular muere, el arrendamiento vence solo.
 - `/health` es *liveness* (el proceso responde); `/ready` es *readiness* (MongoDB responde y la réplica no se está apagando). Con `SIGTERM`, `/ready` pasa a 503, la réplica espera `SHUTDOWN_GRACE_MS` (3 s) para que el balanceador la retire, termina las peticiones en vuelo y cierra MongoDB.
+- **Redis es una cache opcional con respaldo, no una dependencia.** Con `REDIS_URL` definida la API guarda en Redis (a) las cadenas de sesión revocadas/vivas (`RedisCachedRefreshTokenRepository`, decorador del repositorio de refresh tokens: MongoDB sigue siendo la fuente de verdad y el corte de sesión por logout es inmediato en todas las réplicas) y (b) los contadores del límite de login (`RedisRateLimiter`). Sin `REDIS_URL`, o si Redis cae o tarda más de 250 ms, se usa MongoDB (`FallbackRateLimiter`, consulta directa a la fuente de verdad); `/ready` informa `redis: up|down|disabled` pero no depende de él. Medido con 2 réplicas y 300 conexiones sobre una ruta autenticada: +32 % de peticiones por segundo y p99 de 71 a 62 ms; con Redis apagado en plena carga, 0 errores.
 - Cada respuesta lleva `X-Instance` con el id de la réplica (`RAILWAY_REPLICA_ID`), útil para comprobar el balanceo.
 
 **Variables de entorno** (ver `.env.example` para la lista completa)
@@ -165,6 +169,8 @@ En cada servicio de aplicación: *Root Directory* = `backend` y *Config-as-code 
 | `MONGODB_DATABASE` | api, worker | `upb_conecta` |
 | `SESSION_SIGNING_SECRET` | api | Mínimo 32 caracteres y **el mismo en todas las réplicas** (variable compartida del entorno) |
 | `IDENTITY_SEED_TEST_USERS` | api | `true` solo en local o staging. **No definir en producción**: las cuentas de prueba comparten una contraseña pública |
+| `REDIS_URL` | api | Opcional. Referencia al servicio de Redis por la red privada, p. ej. `${{Redis.REDIS_URL}}` |
+| `SERVICE_ROLE` | api, worker | `api` (por defecto) o `worker`: decide qué proceso ejecuta `npm start` |
 | `SHUTDOWN_GRACE_MS` | api | Opcional, 3000 por defecto |
 
 Nota sobre la red privada: los entornos de Railway creados antes del 16-oct-2025 resuelven `*.railway.internal` solo por IPv6; los nuevos, por IPv4 e IPv6.

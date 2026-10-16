@@ -92,10 +92,23 @@ jobs:
           --health-retries 10
           --health-start-period 10s
 
+      # Cache compartida (sesiones revocadas, limite de intentos de login): las
+      # pruebas de sus adaptadores corren contra un Redis real, no un mock.
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       MONGODB_URI: mongodb://localhost:27017
       MONGODB_DATABASE: upb_conecta
       MONGODB_TEST_DATABASE: upb_conecta_test
+      REDIS_TEST_URL: redis://localhost:6379
 
     steps:
       - name: Checkout
@@ -120,7 +133,7 @@ jobs:
       - name: Operaciones administrativas sin rol declarado (HU-46, RNF-18)
         run: npm run check:authorization
 
-      - name: Tests (unitarios + integración contra MongoDB real) y cobertura (umbral 80%)
+      - name: Tests (unitarios + integración contra MongoDB y Redis reales) y cobertura (umbral 80%)
         run: npm run test:coverage
 
       - name: Auditoría de seguridad (dependencias de producción)
