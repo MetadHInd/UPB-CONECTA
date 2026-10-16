@@ -14,7 +14,7 @@ export class PreferencesDataSource implements PersonalDataSourcePort {
     const disabled = Object.entries(found.categoryPreferences)
       .filter(([, enabled]) => !enabled)
       .map(([category]) => category)
-      .sort();
+      .sort((a, b) => a.localeCompare(b));
     return [
       {
         leadTimeMinutes: found.leadTimeMinutes,
