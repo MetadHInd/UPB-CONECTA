@@ -246,17 +246,42 @@ describe('HU-37 — perfil del estudiante y semestre editable (RF-59, RF-60, RNF
       expect(stored?.semesterSource).toBe('student');
     });
 
-    it('si el conflicto persiste, la sincronización falla en lugar de sobrescribir', async () => {
+    it('si el conflicto persiste y lo guardado difiere de lo que se iba a escribir, la sincronización falla en lugar de sobrescribir', async () => {
       const profiles = new InMemoryStudentProfileRepository();
       const harness = buildProfileHarness({ profiles });
       await harness.login();
       profiles.save = async () => false;
 
-      await expect(harness.sync.execute(DIRECTORY_PROFILE)).rejects.toThrow(/concurrente/);
+      // El directorio ahora dice semestre 7 y lo guardado es 5: no hay equivalencia.
+      await expect(harness.sync.execute({ ...DIRECTORY_PROFILE, semester: 7 })).rejects.toThrow(/concurrente/);
       await expect(harness.update.execute({ email: EMAIL, changes: { semester: 6 } })).resolves.toMatchObject({
         ok: false,
         error: ProfileUpdateFailureKind.CONCURRENT_MODIFICATION
       });
+    });
+
+    it('si otro inicio de sesion ya guardo lo mismo, la sincronizacion que pierde la carrera no falla', async () => {
+      const profiles = new InMemoryStudentProfileRepository();
+      const harness = buildProfileHarness({ profiles });
+      await harness.login();
+      profiles.save = async () => false;
+
+      const synced = await harness.sync.execute(DIRECTORY_PROFILE);
+
+      expect(synced.semester?.value).toBe(DIRECTORY_PROFILE.semester);
+    });
+
+    it('un semestre editado por el estudiante cuenta como equivalente: no se pisa ni se falla', async () => {
+      const profiles = new InMemoryStudentProfileRepository();
+      const harness = buildProfileHarness({ profiles });
+      await harness.login();
+      await harness.update.execute({ email: EMAIL, changes: { semester: 10 } });
+      profiles.save = async () => false;
+
+      const synced = await harness.sync.execute(DIRECTORY_PROFILE);
+
+      expect(synced.semester?.value).toBe(10);
+      expect(synced.semesterSource).toBe('student');
     });
   });
 });

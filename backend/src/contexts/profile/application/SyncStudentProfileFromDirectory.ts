@@ -40,7 +40,26 @@ export class SyncStudentProfileFromDirectory {
         : current.syncedWith(record, programId, bounds, clock.now())
     );
     // `apply` nunca devuelve null aqui, asi que el unico fallo posible es el conflicto.
-    if (typeof saved === 'string') throw new ProfileSyncConflictError(email);
-    return saved;
+    if (typeof saved !== 'string') return saved;
+
+    // Muchos inicios de sesion simultaneos de la misma cuenta (varias replicas,
+    // reintentos del cliente) compiten por el mismo documento y los perdedores
+    // agotan sus intentos. Si quien gano ya dejo guardado lo mismo que esta
+    // sincronizacion iba a escribir, el resultado es identico y fallar el login
+    // no aportaria nada: se devuelve el perfil vigente. Si lo guardado difiere
+    // (otro cambio real), el conflicto sigue siendo un error y nada se pisa.
+    const current = await profiles.findByEmail(email);
+    if (current !== null && this.alreadyReflects(current, record, programId)) return current;
+    throw new ProfileSyncConflictError(email);
+  }
+
+  private alreadyReflects(current: StudentProfile, record: DirectoryRecord, programId: string | null): boolean {
+    const { clock, bounds } = this.dependencies;
+    const expected = current.syncedWith(record, programId, bounds, clock.now());
+    return (
+      current.directory.programId === expected.directory.programId &&
+      current.semesterSource === expected.semesterSource &&
+      current.semester?.value === expected.semester?.value
+    );
   }
 }
