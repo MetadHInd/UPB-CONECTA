@@ -183,14 +183,39 @@ async function bootstrap(): Promise<void> {
     (res) => sessionPrincipal(res).subject
   );
 
-  const app = createHttpServer([authRouter, messagingRouter]);
+  let shuttingDown = false;
+  const app = createHttpServer([authRouter, messagingRouter], {
+    // Listo = no estamos apagando y MongoDB responde (con tope de 2 s para no colgar el sondeo).
+    isReady: async () => {
+      if (shuttingDown) return false;
+      await Promise.race([
+        db.command({ ping: 1 }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('ping timeout')), 2000).unref())
+      ]);
+      return true;
+    },
+    instanceId: process.env['RAILWAY_REPLICA_ID'] ?? process.env['HOSTNAME'] ?? 'local'
+  });
   const port = Number(process.env['PORT'] ?? process.env['HTTP_PORT'] ?? 3000);
   const server = app.listen(port, () => {
     console.log(`[http] escuchando en el puerto ${port}`);
   });
 
-  process.on('SIGTERM', () => { server.close(); void client.close(); });
-  process.on('SIGINT', () => { server.close(); void client.close(); });
+  // Apagado ordenado (RNF-12): primero /ready pasa a 503 para que el
+  // balanceador deje de enviar trafico, luego se terminan las peticiones en
+  // vuelo y por ultimo se cierra MongoDB. Tope de 10 s por si algo no termina.
+  const shutdown = (signal: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[http] ${signal}: apagando`);
+    setTimeout(() => process.exit(1), 10_000).unref();
+    server.close(() => {
+      void client.close().finally(() => process.exit(0));
+    });
+    server.closeIdleConnections();
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 bootstrap().catch((error) => {

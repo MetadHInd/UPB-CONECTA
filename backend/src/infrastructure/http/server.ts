@@ -13,12 +13,51 @@ import express, { type Express, type NextFunction, type Request, type Response, 
  * dejar que `next(error)` llegue aqui, en vez de repetir el mismo `try/catch`
  * en cada handler.
  */
-export function createHttpServer(routers: readonly Router[]): Express {
+export interface HttpServerOptions {
+  /**
+   * Sondeo de disponibilidad (`GET /ready`): debe confirmar que las
+   * dependencias que la API necesita para atender (MongoDB) responden. Sin
+   * sondeo, `/ready` responde siempre 200.
+   */
+  readonly isReady?: () => Promise<boolean>;
+  /** Identificador de esta replica; se devuelve en la cabecera `X-Instance`. */
+  readonly instanceId?: string;
+}
+
+export function createHttpServer(routers: readonly Router[], options: HttpServerOptions = {}): Express {
   const app = express();
+  app.disable('x-powered-by');
+  // Detras del balanceador de Railway la IP del cliente llega en
+  // `X-Forwarded-For`; sin esto `req.ip` seria la del proxy y el limite de
+  // tasa por origen (RNF-16) trataria a todos los clientes como uno solo.
+  app.set('trust proxy', 1);
   app.use(express.json());
 
+  if (options.instanceId !== undefined) {
+    const instanceId = options.instanceId;
+    app.use((_req: Request, res: Response, next: NextFunction) => {
+      res.setHeader('X-Instance', instanceId);
+      next();
+    });
+  }
+
+  // Liveness: el proceso esta vivo. No consulta dependencias a proposito: si
+  // MongoDB cae, reiniciar la API no lo arregla.
   app.get('/health', (_req: Request, res: Response) => {
     res.status(200).json({ ok: true });
+  });
+
+  // Readiness: la replica puede recibir trafico. El balanceador deja de
+  // enviarle peticiones mientras responda 503 (MongoDB caido o apagado en curso).
+  app.get('/ready', (_req: Request, res: Response) => {
+    const check = options.isReady ?? (async () => true);
+    check()
+      .then((ready) => {
+        res.status(ready ? 200 : 503).json({ ok: ready, ready });
+      })
+      .catch(() => {
+        res.status(503).json({ ok: false, ready: false });
+      });
   });
 
   for (const router of routers) {
