@@ -10,7 +10,7 @@ import { SessionPolicy } from './contexts/identity/domain/value-objects/SessionP
 import { MongoIdentityProviderAdapter } from './contexts/identity/infrastructure/adapters/out/mongo/MongoIdentityProviderAdapter.js';
 import { MongoAccountRoleRepository } from './contexts/identity/infrastructure/adapters/out/mongo/MongoAccountRoleRepository.js';
 import { seedTestAccounts } from './contexts/identity/infrastructure/seed/TestAccountSeeder.js';
-import { InMemoryRateLimiter } from './contexts/identity/infrastructure/adapters/out/memory/InMemoryRateLimiter.js';
+import { MongoRateLimiter } from './contexts/identity/infrastructure/adapters/out/mongo/MongoRateLimiter.js';
 import { JoseTokenSigningAdapter } from './contexts/identity/infrastructure/adapters/out/jwt/JoseTokenSigningAdapter.js';
 import { RandomSessionIdGenerator } from './contexts/identity/infrastructure/adapters/out/crypto/RandomSessionIdGenerator.js';
 import { MongoRefreshTokenRepository } from './contexts/identity/infrastructure/adapters/out/mongo/MongoRefreshTokenRepository.js';
@@ -79,6 +79,7 @@ async function bootstrap(): Promise<void> {
   await MongoRefreshTokenRepository.ensureIndexes(db);
   await MongoConsentRepository.ensureIndexes(db);
   await MongoConversationRepository.ensureIndexes(db);
+  await MongoRateLimiter.ensureIndexes(db);
 
   const clock = new SystemClock();
   const sessionConfig = readSessionConfig();
@@ -144,7 +145,8 @@ async function bootstrap(): Promise<void> {
 
   const authenticateStudent = new AuthenticateStudent({
     provider: identityProvider,
-    rateLimiter: new InMemoryRateLimiter(readIdentityRateLimitConfig()),
+    // Estado compartido en MongoDB: el limite vale entre todas las replicas de la API.
+    rateLimiter: new MongoRateLimiter(db, readIdentityRateLimitConfig()),
     sessions: sessionTokenIssuer,
     profileSync: new FanOutProfileSync([profileSync, forumAuthorSync]),
     consentStatus,

@@ -72,11 +72,12 @@ async function handleLogin(req: Request, res: Response, authenticateStudent: Aut
   const body = req.body as Record<string, unknown> | null | undefined;
   const username = body?.['username'];
   const password = body?.['password'];
-  // El origen alimenta el rate limiting por origen (HU-43). El cliente Android
-  // no tiene una nocion natural de "origen web"; se fija un valor constante
-  // hasta que exista mas de un cliente que necesite distinguirse.
-  const rawOrigin = body?.['origin'];
-  const origin = typeof rawOrigin === 'string' && rawOrigin.trim() !== '' ? rawOrigin.trim() : 'android-app';
+  // El origen alimenta el rate limiting por origen (HU-43, RNF-16). Sale de la
+  // IP real del cliente (Express la resuelve con `trust proxy` detras del
+  // balanceador), nunca del cuerpo: un valor que elige el cliente permitiria
+  // evadir el limite rotandolo, y una constante haria que todos los usuarios
+  // compartieran un mismo cubo.
+  const origin = req.ip ?? 'unknown';
 
   if (typeof username !== 'string' || username.trim() === '' || typeof password !== 'string' || password === '') {
     res.status(400).json({

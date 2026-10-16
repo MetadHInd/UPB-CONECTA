@@ -43,7 +43,7 @@ export class AuthenticateStudent {
     const accountId = input.username.trim().toLowerCase();
     const origin = input.origin.trim();
 
-    if (!this.dependencies.rateLimiter.checkAllowed(accountId, origin)) {
+    if (!(await this.dependencies.rateLimiter.checkAllowed(accountId, origin))) {
       return {
         ok: false,
         error: AuthenticationFailureKind.RATE_LIMITED,
@@ -55,7 +55,7 @@ export class AuthenticateStudent {
     try {
       profile = await this.dependencies.provider.authenticate(input);
     } catch (error) {
-      this.dependencies.rateLimiter.recordFailure(accountId, origin);
+      await this.dependencies.rateLimiter.recordFailure(accountId, origin);
 
       if (error instanceof ProviderUnavailableError) {
         return {
@@ -72,7 +72,7 @@ export class AuthenticateStudent {
       };
     }
 
-    this.dependencies.rateLimiter.recordSuccess(accountId, origin);
+    await this.dependencies.rateLimiter.recordSuccess(accountId, origin);
     // HU-37: el perfil persistido se refresca con el directorio antes de abrir
     // la sesion, para que el primer feed ya use programa y semestre vigentes.
     await this.dependencies.profileSync.syncFromDirectory(profile);
