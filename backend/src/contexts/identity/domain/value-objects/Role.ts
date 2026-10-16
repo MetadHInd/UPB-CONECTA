@@ -1,10 +1,11 @@
 /**
- * HU-46, criterio 4: catalogo minimo de roles de cuenta. Dos roles porque son
- * los dos que la historia pide distinguir; agregar uno nuevo es agregar un
- * valor aqui, sin tocar la politica de autorizacion.
+ * HU-46, criterio 4: catalogo de roles de cuenta. `professor` se agrego
+ * despues de la historia para distinguir docentes de estudiantes en la app;
+ * su lugar en la jerarquia lo fija `AuthorizationPolicy`.
  */
 export enum Role {
   STUDENT = 'student',
+  PROFESSOR = 'professor',
   CONTENT_ADMIN = 'content-admin'
 }
 

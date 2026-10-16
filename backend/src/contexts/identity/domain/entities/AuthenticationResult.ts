@@ -1,6 +1,7 @@
 import type { IdentityProfile } from './IdentityProfile.js';
 import type { SessionTokens } from '../value-objects/SessionTokens.js';
 import type { ConsentRequirementResult } from '../ports/out/ConsentStatusPort.js';
+import type { Role } from '../value-objects/Role.js';
 
 export enum AuthenticationFailureKind {
   INVALID_CREDENTIALS = 'invalid-credentials',
@@ -14,6 +15,13 @@ export type AuthenticationResult =
   | {
       readonly ok: true;
       readonly profile: IdentityProfile;
+      /**
+       * HU-46: rol vigente de la cuenta, leido fresco de
+       * `AccountRoleRepositoryPort` en cada login (sin registro = `student`).
+       * Solo informa al cliente que pantallas mostrar; la autorizacion real
+       * sigue ocurriendo en servidor con `AuthorizeOperation`.
+       */
+      readonly role: Role;
       readonly message: string;
       /** Par access + refresh de la sesion recien iniciada (HU-45). */
       readonly session: SessionTokens;

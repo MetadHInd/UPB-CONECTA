@@ -5,6 +5,8 @@ import { InMemoryIdentityProviderAdapter } from '../../src/contexts/identity/inf
 import { InMemoryRateLimiter } from '../../src/contexts/identity/infrastructure/adapters/out/memory/InMemoryRateLimiter.js';
 import { readIdentityRateLimitConfig } from '../../src/contexts/identity/infrastructure/config/IdentityRateLimitConfig.js';
 import { AuthenticationError, AuthenticationFailureKind } from '../../src/contexts/identity/domain/entities/AuthenticationResult.js';
+import { InMemoryAccountRoleRepository } from '../../src/contexts/identity/infrastructure/adapters/out/memory/InMemoryAccountRoleRepository.js';
+import { Role } from '../../src/contexts/identity/domain/value-objects/Role.js';
 import { buildSessionHarness, ignoreConsentStatus, ignoreProfileSync } from './sessionHarness.js';
 
 describe('HU-43 — autenticación institucional', () => {
@@ -141,5 +143,33 @@ describe('HU-43 — autenticación institucional', () => {
     expect(config.windowMs).toBe(120_000);
     expect(config.maxAttemptsPerAccount).toBe(4);
     expect(config.maxAttemptsPerOrigin).toBe(7);
+  });
+
+  it('HU-46: la respuesta del login incluye el rol de la cuenta (student por defecto)', async () => {
+    const accountRoles = new InMemoryAccountRoleRepository();
+    const build = () =>
+      new AuthenticateStudent({
+        provider: new InMemoryIdentityProviderAdapter(),
+        rateLimiter: new InMemoryRateLimiter(),
+        sessions: buildSessionHarness().sessions,
+        profileSync: ignoreProfileSync,
+        consentStatus: ignoreConsentStatus,
+        accountRoles
+      });
+    const credentials = { username: 'estudiante@upb.edu.co', password: 'S3cr3t!UPB', origin: '192.168.1.14' };
+
+    const asStudent = await build().execute(credentials);
+    if (!asStudent.ok) throw new Error('Se esperaba autenticacion correcta');
+    expect(asStudent.role).toBe(Role.STUDENT);
+
+    await accountRoles.save({ subject: 'estudiante@upb.edu.co', role: Role.CONTENT_ADMIN, assignedAt: new Date(), assignedBy: 'coordinador@upb.edu.co' });
+    const asAdmin = await build().execute(credentials);
+    if (!asAdmin.ok) throw new Error('Se esperaba autenticacion correcta');
+    expect(asAdmin.role).toBe(Role.CONTENT_ADMIN);
+
+    await accountRoles.save({ subject: 'estudiante@upb.edu.co', role: Role.PROFESSOR, assignedAt: new Date(), assignedBy: 'coordinador@upb.edu.co' });
+    const asProfessor = await build().execute(credentials);
+    if (!asProfessor.ok) throw new Error('Se esperaba autenticacion correcta');
+    expect(asProfessor.role).toBe(Role.PROFESSOR);
   });
 });

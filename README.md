@@ -14,7 +14,7 @@ Proyecto académico de **Proyecto Integrador III**, Ingeniería de Sistemas e In
 
 ## Estructura del repositorio
 
-Dos proyectos independientes, cada uno con su propio ciclo de vida, dependencias y CI — conectados únicamente por un contrato REST (todavía por construir en el backend):
+Dos proyectos independientes, cada uno con su propio ciclo de vida, dependencias y CI — conectados únicamente por un contrato REST (el backend ya expone login, sesión y mensajería profesor-estudiante; el resto de contextos aún no tiene rutas HTTP):
 
 ```
 backend/    Node.js + TypeScript, arquitectura hexagonal. Ingesta, dominio y persistencia (MongoDB).

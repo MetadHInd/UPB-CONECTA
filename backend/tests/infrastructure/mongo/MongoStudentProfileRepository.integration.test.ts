@@ -117,4 +117,14 @@ describe('MongoStudentProfileRepository (integración contra MongoDB real)', () 
       version: 3
     });
   });
+
+  it('muchos inicios de sesion simultaneos de la misma cuenta sincronizan sin error y dejan un solo perfil', async () => {
+    const harness = buildProfileHarness({ profiles: repository });
+
+    const results = await Promise.allSettled(Array.from({ length: 200 }, () => harness.sync.execute(DIRECTORY_PROFILE)));
+
+    expect(results.filter((result) => result.status === 'rejected')).toEqual([]);
+    expect(await db.collection(COLLECTION).countDocuments({ _id: EMAIL as never })).toBe(1);
+    expect((await repository.findByEmail(EMAIL))?.semester?.value).toBe(DIRECTORY_PROFILE.semester);
+  });
 });

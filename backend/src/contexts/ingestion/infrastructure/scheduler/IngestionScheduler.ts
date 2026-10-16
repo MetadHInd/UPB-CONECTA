@@ -1,4 +1,3 @@
-import type { IngestInstitutionalMessagesPort } from '../../domain/ports/in/IngestInstitutionalMessagesPort.js';
 import type { IngestionConfig } from '../config/IngestionConfig.js';
 
 /**
@@ -15,7 +14,9 @@ export class IngestionScheduler {
   private running = false;
 
   constructor(
-    private readonly useCase: IngestInstitutionalMessagesPort,
+    // El planificador ignora el resultado del ciclo: basta con `execute()`,
+    // lo que permite envolver el caso de uso (p. ej. con un candado entre replicas).
+    private readonly useCase: { execute(): Promise<unknown> },
     private readonly readConfig: () => IngestionConfig,
     private readonly onError: (error: unknown) => void = () => {}
   ) {}
