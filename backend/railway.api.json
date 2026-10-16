@@ -5,7 +5,7 @@
     "buildCommand": "npm run build"
   },
   "deploy": {
-    "startCommand": "npm run start:http",
+    "startCommand": "npm start",
     "healthcheckPath": "/ready",
     "healthcheckTimeout": 60,
     "numReplicas": 2,
