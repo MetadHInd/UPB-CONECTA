@@ -136,9 +136,11 @@ async function bootstrap(): Promise<void> {
   const identityProvider = new MongoIdentityProviderAdapter(db);
   const accountRoles = new MongoAccountRoleRepository(db);
 
-  // Cuentas de prueba, estudiantes y profesores (ver `TestAccountSeeder`). Solo crea
-  // las que falten; se desactiva con IDENTITY_SEED_TEST_USERS=false.
-  if (process.env['IDENTITY_SEED_TEST_USERS'] !== 'false') {
+  // Cuentas de prueba, estudiantes y profesores (ver `TestAccountSeeder`). Solo
+  // se crean si IDENTITY_SEED_TEST_USERS=true (local y staging): comparten una
+  // contrasena publica, asi que NO deben sembrarse por defecto en produccion.
+  // Solo crea las que falten, de forma segura con varias replicas arrancando a la vez.
+  if (process.env['IDENTITY_SEED_TEST_USERS'] === 'true') {
     const seeded = await seedTestAccounts(identityProvider, accountRoles);
     console.log(`[http] cuentas de prueba: ${seeded.created.length} creadas, ${seeded.existing.length} ya existian`);
   }

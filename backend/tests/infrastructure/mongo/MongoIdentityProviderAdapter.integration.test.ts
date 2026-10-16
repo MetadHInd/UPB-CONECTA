@@ -99,4 +99,24 @@ describe('MongoIdentityProviderAdapter (integración contra MongoDB real)', () =
 
     expect(profile).toEqual({ name: 'Ricardo Méndez', email: 'profesor@upb.edu.co', program: 'Ingeniería de Sistemas' });
   });
+
+  it('dos replicas sembrando a la vez: cada cuenta se crea una sola vez y ninguna falla', async () => {
+    const replicaA = new MongoIdentityProviderAdapter(db, USERS_COLLECTION);
+    const replicaB = new MongoIdentityProviderAdapter(db, USERS_COLLECTION);
+
+    const [a, b] = await Promise.all([seedTestAccounts(replicaA, roles), seedTestAccounts(replicaB, roles)]);
+
+    expect(a.created.length + b.created.length).toBe(a.created.length + a.existing.length);
+    expect(await db.collection(USERS_COLLECTION).countDocuments()).toBe(a.created.length + a.existing.length);
+  });
+
+  it('registerIfAbsent concurrente sobre la misma cuenta devuelve true exactamente una vez', async () => {
+    const account = {
+      username: 'carrera@upb.edu.co',
+      password: 'Clave123!',
+      profile: { name: 'Carrera', email: 'carrera@upb.edu.co', program: 'Ingeniería de Sistemas', semester: 3 }
+    };
+    const results = await Promise.all(Array.from({ length: 10 }, () => users.registerIfAbsent(account)));
+    expect(results.filter(Boolean)).toHaveLength(1);
+  });
 });

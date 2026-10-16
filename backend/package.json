@@ -11,7 +11,10 @@
     "test:coverage": "vitest run --config config/vitest.config.ts --coverage",
     "check:architecture": "node scripts/check-architecture.mjs",
     "check:authorization": "node scripts/check-declared-authorization.mjs",
-    "start:http": "node --env-file=.env dist/src/http-server.js",
+    "start:http": "node dist/src/http-server.js",
+    "start:worker": "node dist/src/main.js",
+    "dev:http": "node --env-file=.env dist/src/http-server.js",
+    "dev:worker": "node --env-file=.env dist/src/main.js",
     "user:create": "node dist/src/create-user.js"
   },
   "dependencies": {

@@ -90,19 +90,20 @@ export class MongoIdentityProviderAdapter implements IdentityProviderPort {
   /** Crea la cuenta solo si no existe; devuelve `true` si la creo. Nunca pisa una contrasena cambiada a mano. */
   async registerIfAbsent(account: IdentityAccount): Promise<boolean> {
     const now = new Date();
-    const result = await this.collection.updateOne(
-      { _id: normalizeUsername(account.username) },
-      {
-        $setOnInsert: {
-          passwordHash: await hashPassword(account.password),
-          profile: account.profile,
-          createdAt: now,
-          updatedAt: now
-        }
-      },
-      { upsert: true }
-    );
-    return result.upsertedCount === 1;
+    const passwordHash = await hashPassword(account.password);
+    try {
+      const result = await this.collection.updateOne(
+        { _id: normalizeUsername(account.username) },
+        { $setOnInsert: { passwordHash, profile: account.profile, createdAt: now, updatedAt: now } },
+        { upsert: true }
+      );
+      return result.upsertedCount === 1;
+    } catch (error) {
+      // Dos replicas arrancando a la vez pueden competir por el mismo upsert:
+      // la que pierde recibe clave duplicada, que equivale a "ya existia".
+      if ((error as { code?: number }).code === 11000) return false;
+      throw error;
+    }
   }
 }
 
