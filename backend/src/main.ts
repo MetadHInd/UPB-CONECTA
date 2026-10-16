@@ -38,6 +38,7 @@ import { MongoNotificationPreferencesRepository } from './contexts/notifications
 import { readDueDateReminderConfig } from './contexts/notifications/infrastructure/config/DueDateReminderConfig.js';
 import { DueDateReminderScheduler } from './contexts/notifications/infrastructure/scheduler/DueDateReminderScheduler.js';
 import { SystemClock as NotificationsSystemClock } from './contexts/notifications/infrastructure/adapters/out/memory/SystemClock.js';
+import { MongoLease, withLease } from './infrastructure/shared/MongoLease.js';
 import { PracticeTrackingFollowersAdapter } from './contexts/notifications/infrastructure/adapters/out/practices/PracticeTrackingFollowersAdapter.js';
 import { MongoPracticeApplicationTrackingRepository } from './contexts/practices/infrastructure/adapters/out/mongo/MongoPracticeApplicationTrackingRepository.js';
 
@@ -59,6 +60,7 @@ async function bootstrap(): Promise<void> {
   await MongoClassificationResultRepository.ensureIndexes(db);
   await MongoPostProcessingRuleRepository.ensureIndexes(db);
   await MongoEmittedReminderRegistry.ensureIndexes(db);
+  await MongoLease.ensureIndexes(db);
   await MongoPracticeApplicationTrackingRepository.ensureIndexes(db);
 
   const clock = new SystemClock();
@@ -130,9 +132,22 @@ async function bootstrap(): Promise<void> {
     batchSize: config.batchSize
   });
 
-  const scheduler = new IngestionScheduler(useCase, () => readIngestionConfig(), (error) => {
-    console.error('[ingesta] ciclo fallido:', error);
-  });
+  // Varias replicas del worker (o un reinicio con solape) no deben correr el
+  // mismo ciclo a la vez: cada ciclo exige un arrendamiento en MongoDB. El TTL
+  // cubre un proceso que muere a mitad de ciclo (RNF-02: un lote < 5 min).
+  const lease = new MongoLease(db);
+  const INGESTION_LEASE_TTL_MS = 10 * 60_000;
+  const REMINDERS_LEASE_TTL_MS = 2 * 60_000;
+
+  const scheduler = new IngestionScheduler(
+    withLease(lease, 'ingesta', INGESTION_LEASE_TTL_MS, useCase, () => {
+      console.log('[ingesta] ciclo omitido: otra replica tiene el arrendamiento');
+    }),
+    () => readIngestionConfig(),
+    (error) => {
+      console.error('[ingesta] ciclo fallido:', error);
+    }
+  );
 
   // HU-19: planificador de avisos de vencimiento. Relee el estado vigente de
   // cada convocatoria en cada ciclo (ver documentacion de `EmitDueDateReminders`
@@ -151,14 +166,31 @@ async function bootstrap(): Promise<void> {
     // HU-23: tambien avisa a quien sigue una practica de interes o postulada.
     followers: new PracticeTrackingFollowersAdapter(new MongoPracticeApplicationTrackingRepository(db))
   });
-  const dueDateReminderScheduler = new DueDateReminderScheduler(emitDueDateReminders, () => readDueDateReminderConfig(), (error) => {
-    console.error('[avisos-vencimiento] ciclo fallido:', error);
-  });
+  const dueDateReminderScheduler = new DueDateReminderScheduler(
+    withLease(lease, 'avisos-vencimiento', REMINDERS_LEASE_TTL_MS, emitDueDateReminders, () => {
+      console.log('[avisos-vencimiento] ciclo omitido: otra replica tiene el arrendamiento');
+    }),
+    () => readDueDateReminderConfig(),
+    (error) => {
+      console.error('[avisos-vencimiento] ciclo fallido:', error);
+    }
+  );
 
   scheduler.start();
   dueDateReminderScheduler.start();
-  process.on('SIGTERM', () => { scheduler.stop(); dueDateReminderScheduler.stop(); void client.close(); });
-  process.on('SIGINT', () => { scheduler.stop(); dueDateReminderScheduler.stop(); void client.close(); });
+  // Apagado ordenado: se detienen los planificadores (no arrancan ciclos
+  // nuevos), se suelta lo que esta replica tenga y se cierra MongoDB.
+  const shutdown = (signal: string): void => {
+    console.log(`[ingesta] ${signal}: apagando`);
+    scheduler.stop();
+    dueDateReminderScheduler.stop();
+    void Promise.all([lease.release('ingesta'), lease.release('avisos-vencimiento')])
+      .catch(() => undefined)
+      .finally(() => client.close().finally(() => process.exit(0)));
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 bootstrap().catch((error) => {
