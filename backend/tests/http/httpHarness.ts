@@ -2,8 +2,10 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import type { Router } from 'express';
 import { createHttpServer } from '../../src/infrastructure/http/server.js';
+import { STUDENT } from '../identity/sessionHarness.js';
 
-export const PASSWORD = 'S3cr3t!UPB';
+/** Credencial de prueba compartida con el resto de arneses (no es un secreto real). */
+export const PASSWORD = STUDENT.password;
 export const EMAIL = 'ana.perez@upb.edu.co';
 export const STUDENT_PROFILE = { name: 'Ana Pérez', email: EMAIL, program: 'Ingeniería de Sistemas e Informática', semester: 6 };
 
