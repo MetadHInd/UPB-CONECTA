@@ -9,9 +9,9 @@ import type { ChatbotOutput, ChatbotPort, ChatbotRequest } from '../../../../dom
  * pruebas. Sustituible por un proveedor de IA detras del mismo puerto.
  */
 export class ExtractiveChatbot implements ChatbotPort {
-  async generate(request: ChatbotRequest): Promise<ChatbotOutput> {
+  generate(request: ChatbotRequest): Promise<ChatbotOutput> {
     const best = request.entries[0];
-    if (best === undefined) return { text: '', sources: [] };
-    return { text: best.content, sources: [{ kind: 'knowledge-entry', entryId: best.id }] };
+    if (best === undefined) return Promise.resolve({ text: '', sources: [] });
+    return Promise.resolve({ text: best.content, sources: [{ kind: 'knowledge-entry', entryId: best.id }] });
   }
 }

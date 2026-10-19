@@ -1,7 +1,6 @@
-import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createHttpServer } from '../../src/infrastructure/http/server.js';
+import { EMAIL, PASSWORD, STUDENT_PROFILE, startHttp } from './httpHarness.js';
 import { createAuthRouter } from '../../src/contexts/identity/infrastructure/http/authRoutes.js';
 import { requireSession, sessionPrincipal } from '../../src/contexts/identity/infrastructure/http/requireSession.js';
 import { createFeedRouter } from '../../src/contexts/feed/infrastructure/http/feedRoutes.js';
@@ -9,8 +8,6 @@ import { createProfileRouter } from '../../src/contexts/profile/infrastructure/h
 import { ProfileUpdateFailureKind } from '../../src/contexts/profile/application/UpdateStudentProfile.js';
 import { buildSessionHarness } from '../identity/sessionHarness.js';
 
-const PASSWORD = 'S3cr3t!UPB';
-const EMAIL = 'ana.perez@upb.edu.co';
 let server: Server | undefined;
 
 afterEach(() => {
@@ -23,7 +20,7 @@ async function start() {
   identity.provider.register({
     username: EMAIL,
     password: PASSWORD,
-    profile: { name: 'Ana Pérez', email: EMAIL, program: 'Ingeniería de Sistemas e Informática', semester: 6 }
+    profile: STUDENT_PROFILE
   });
   const calls: { feed: Array<{ studentEmail: string; limit?: number | undefined; text?: string | undefined; categories?: readonly string[] | undefined }>; updates: Array<Record<string, unknown>> } = {
     feed: [],
@@ -31,7 +28,7 @@ async function start() {
   };
   const guard = requireSession(identity.verifyAccess);
   const principal = (res: Parameters<typeof sessionPrincipal>[0]) => sessionPrincipal(res).subject;
-  const app = createHttpServer([
+  const http = await startHttp([
     createAuthRouter(identity.authenticate, { refresh: identity.refresh, logout: identity.logout }),
     createFeedRouter(
       {
@@ -65,25 +62,10 @@ async function start() {
       guard,
       principal
     )
-  ]);
-  server = app.listen(0);
-  await new Promise((resolve) => server!.once('listening', resolve));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-
-  async function call(method: string, path: string, options: { token?: string; body?: unknown } = {}) {
-    const response = await fetch(base + path, {
-      method,
-      headers: {
-        'content-type': 'application/json',
-        ...(options.token ? { authorization: `Bearer ${options.token}` } : {})
-      },
-      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {})
-    });
-    return { status: response.status, body: (await response.json()) as Record<string, any> };
-  }
-  const login = await call('POST', '/auth/login', { body: { username: EMAIL, password: PASSWORD } });
-  const token = login.body['session'].accessToken.value as string;
-  return { call, token, calls };
+  ], (created) => {
+    server = created;
+  });
+  return { ...http, calls };
 }
 
 describe('Feed y perfil por HTTP con sesión real', () => {

@@ -88,43 +88,45 @@ async function main(): Promise<void> {
     const classification = new MongoClassificationResultRepository(db);
     const messages = db.collection<{ _id: string }>(MongoConvocatoriaRepository.DEFAULT_COLLECTION);
 
-    for (const item of CONVOCATORIAS) {
-      const sentAt = new Date(now.getTime() - 6 * HOUR_MS);
-      const dueDate =
-        item.closesInHours === null
-          ? { kind: 'sin-vencimiento' }
-          : { kind: 'con-fecha', date: new Date(now.getTime() + item.closesInHours * HOUR_MS) };
-      await messages.updateOne(
-        { _id: item.id },
-        {
-          $set: {
-            sender: item.sender,
-            subject: item.subject,
-            body: item.body,
-            representativeMessageId: item.id,
-            firstSentAt: sentAt,
-            lastSentAt: sentAt,
-            resendCount: 0,
-            dueDate,
-            applicationLink: item.link,
-            withdrawnAt: null
-          }
-        },
-        { upsert: true }
-      );
-      await targeting.save({ messageId: item.id, targeting: item.targeting, semesterRange: null, persistedAt: now });
-      await classification.save({
-        messageId: item.id,
-        proposedCategory: item.category,
-        finalCategory: item.category,
-        isKnownFalsePositiveCase: false,
-        reason: null,
-        appliedRuleId: null,
-        confidenceScore: 0.95,
-        publicationStatus: 'published',
-        persistedAt: now
-      });
-    }
+    await Promise.all(
+      CONVOCATORIAS.map(async (item) => {
+        const sentAt = new Date(now.getTime() - 6 * HOUR_MS);
+        const dueDate =
+          item.closesInHours === null
+            ? { kind: 'sin-vencimiento' }
+            : { kind: 'con-fecha', date: new Date(now.getTime() + item.closesInHours * HOUR_MS) };
+        await messages.updateOne(
+          { _id: item.id },
+          {
+            $set: {
+              sender: item.sender,
+              subject: item.subject,
+              body: item.body,
+              representativeMessageId: item.id,
+              firstSentAt: sentAt,
+              lastSentAt: sentAt,
+              resendCount: 0,
+              dueDate,
+              applicationLink: item.link,
+              withdrawnAt: null
+            }
+          },
+          { upsert: true }
+        );
+        await targeting.save({ messageId: item.id, targeting: item.targeting, semesterRange: null, persistedAt: now });
+        await classification.save({
+          messageId: item.id,
+          proposedCategory: item.category,
+          finalCategory: item.category,
+          isKnownFalsePositiveCase: false,
+          reason: null,
+          appliedRuleId: null,
+          confidenceScore: 0.95,
+          publicationStatus: 'published',
+          persistedAt: now
+        });
+      })
+    );
 
     const entries = new MongoKnowledgeEntryRepository(db);
     const existingTitles = new Set((await entries.findAll()).map((entry) => entry.title));
@@ -136,13 +138,14 @@ async function main(): Promise<void> {
       schema: await loadKnowledgeBaseSchema(),
       clock
     });
-    let published = 0;
-    for (const entry of KNOWLEDGE) {
-      if (existingTitles.has(entry.title)) continue;
-      const result = await publish.execute({ publishedBy: 'contenido@upb.edu.co', form: entry });
-      if (!result.ok) throw new Error(`No se pudo publicar "${entry.title}": ${JSON.stringify(result)}`);
-      published++;
-    }
+    const pending = KNOWLEDGE.filter((entry) => !existingTitles.has(entry.title));
+    await Promise.all(
+      pending.map(async (entry) => {
+        const result = await publish.execute({ publishedBy: 'contenido@upb.edu.co', form: entry });
+        if (!result.ok) throw new Error(`No se pudo publicar "${entry.title}": ${JSON.stringify(result)}`);
+      })
+    );
+    const published = pending.length;
 
     console.log(`[seed-demo] base "${database}": ${CONVOCATORIAS.length} convocatorias (upsert), ${published} entradas nuevas de conocimiento`);
   } finally {
@@ -150,7 +153,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
+try {
+  await main();
+} catch (error) {
   console.error('[seed-demo] fallo:', error);
   process.exit(1);
-});
+}

@@ -1,7 +1,6 @@
-import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createHttpServer } from '../../src/infrastructure/http/server.js';
+import { EMAIL, PASSWORD, STUDENT_PROFILE, startHttp } from './httpHarness.js';
 import { createAuthRouter } from '../../src/contexts/identity/infrastructure/http/authRoutes.js';
 import { requireSession, sessionPrincipal } from '../../src/contexts/identity/infrastructure/http/requireSession.js';
 import { createChatbotRouter } from '../../src/contexts/chatbot/infrastructure/http/chatbotRoutes.js';
@@ -17,8 +16,6 @@ import { InMemoryConsolidatedMessageRegistry } from '../../src/contexts/ingestio
 import { ADMIN, buildKnowledgeHarness, validForm } from '../knowledge/knowledgeHarness.js';
 import { buildSessionHarness } from '../identity/sessionHarness.js';
 
-const PASSWORD = 'S3cr3t!UPB';
-const EMAIL = 'ana.perez@upb.edu.co';
 let server: Server | undefined;
 
 afterEach(() => {
@@ -31,7 +28,7 @@ async function start() {
   identity.provider.register({
     username: EMAIL,
     password: PASSWORD,
-    profile: { name: 'Ana Pérez', email: EMAIL, program: 'Ingeniería de Sistemas e Informática', semester: 6 }
+    profile: STUDENT_PROFILE
   });
   const knowledge = buildKnowledgeHarness();
   const published = await knowledge.publish.execute({ publishedBy: ADMIN, form: validForm() });
@@ -51,27 +48,13 @@ async function start() {
     clock,
     idleMs: 30 * 60 * 1000
   });
-  const app = createHttpServer([
+  const http = await startHttp([
     createAuthRouter(identity.authenticate, { refresh: identity.refresh, logout: identity.logout }),
     createChatbotRouter({ converse }, requireSession(identity.verifyAccess), (res) => sessionPrincipal(res).sessionId)
-  ]);
-  server = app.listen(0);
-  await new Promise((resolve) => server!.once('listening', resolve));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-
-  async function call(method: string, path: string, options: { token?: string; body?: unknown } = {}) {
-    const response = await fetch(base + path, {
-      method,
-      headers: {
-        'content-type': 'application/json',
-        ...(options.token ? { authorization: `Bearer ${options.token}` } : {})
-      },
-      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {})
-    });
-    return { status: response.status, body: (await response.json()) as Record<string, any> };
-  }
-  const login = await call('POST', '/auth/login', { body: { username: EMAIL, password: PASSWORD } });
-  return { call, token: login.body['session'].accessToken.value as string, entryId: published.entry.id };
+  ], (created) => {
+    server = created;
+  });
+  return { ...http, entryId: published.entry.id };
 }
 
 describe('Chatbot por HTTP con sesión real', () => {

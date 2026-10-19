@@ -26,11 +26,11 @@ export function createFeedRouter(
     const limit = parseLimit(req.query['limit']);
     const text = parseText(req.query['q']);
     const categories = parseCategories(req.query['categories']);
-    if (limit === 'invalid') return badRequest(res, 'invalid-limit', `limit debe ser un entero entre 1 y ${MAX_LIMIT}.`);
-    if (text === 'invalid') return badRequest(res, 'invalid-text', `q debe ser un texto de hasta ${MAX_TEXT_LENGTH} caracteres.`);
-    if (categories === 'invalid') return badRequest(res, 'invalid-category', 'categories debe ser una lista separada por comas.');
+    if (!limit.ok) return badRequest(res, 'invalid-limit', `limit debe ser un entero entre 1 y ${MAX_LIMIT}.`);
+    if (!text.ok) return badRequest(res, 'invalid-text', `q debe ser un texto de hasta ${MAX_TEXT_LENGTH} caracteres.`);
+    if (!categories.ok) return badRequest(res, 'invalid-category', 'categories debe ser una lista separada por comas.');
     useCases.queryFeed
-      .execute({ studentEmail: principalEmail(res), limit, text, categories })
+      .execute({ studentEmail: principalEmail(res), limit: limit.value, text: text.value, categories: categories.value })
       .then((result) => {
         res.status(result.ok ? 200 : 400).json(result);
       })
@@ -40,24 +40,26 @@ export function createFeedRouter(
   return router;
 }
 
-function parseLimit(raw: unknown): number | undefined | 'invalid' {
-  if (raw === undefined) return undefined;
-  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return 'invalid';
+type Parsed<T> = { readonly ok: true; readonly value: T | undefined } | { readonly ok: false };
+
+function parseLimit(raw: unknown): Parsed<number> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return { ok: false };
   const value = Number(raw);
-  return value >= 1 && value <= MAX_LIMIT ? value : 'invalid';
+  return value >= 1 && value <= MAX_LIMIT ? { ok: true, value } : { ok: false };
 }
 
 function badRequest(res: Response, error: string, message: string): void {
   res.status(400).json({ ok: false, error, message });
 }
 
-function parseText(raw: unknown): string | undefined | 'invalid' {
-  if (raw === undefined) return undefined;
-  return typeof raw === 'string' && raw.length <= MAX_TEXT_LENGTH ? raw : 'invalid';
+function parseText(raw: unknown): Parsed<string> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  return typeof raw === 'string' && raw.length <= MAX_TEXT_LENGTH ? { ok: true, value: raw } : { ok: false };
 }
 
-function parseCategories(raw: unknown): readonly string[] | undefined | 'invalid' {
-  if (raw === undefined) return undefined;
-  if (typeof raw !== 'string') return 'invalid';
-  return raw.split(',').map((part) => part.trim()).filter((part) => part !== '');
+function parseCategories(raw: unknown): Parsed<readonly string[]> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (typeof raw !== 'string') return { ok: false };
+  return { ok: true, value: raw.split(',').map((part) => part.trim()).filter((part) => part !== '') };
 }

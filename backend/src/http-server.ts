@@ -263,7 +263,7 @@ async function bootstrap(): Promise<void> {
       updateProfile: new UpdateStudentProfile({ profiles: studentProfiles, clock, bounds: profileConfig.semesterBounds }),
       findDirectoryRecord: async (email) => {
         const found = await identityProvider.findProfile(email);
-        return found === null || found.semester === undefined
+        return found?.semester === undefined
           ? null
           : { name: found.name, email: found.email, program: found.program, semester: found.semester };
       }
