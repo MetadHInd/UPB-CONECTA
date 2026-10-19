@@ -49,6 +49,32 @@ import { SyncForumAuthor } from './contexts/forum/application/SyncForumAuthor.js
 import { MongoForumAuthorRepository } from './contexts/forum/infrastructure/adapters/out/mongo/MongoForumAuthorRepository.js';
 import { IdentityForumAuthorSyncAdapter } from './contexts/forum/infrastructure/integration/IdentityForumAuthorSyncAdapter.js';
 
+import { ViewStudentProfile } from './contexts/profile/application/ViewStudentProfile.js';
+import { UpdateStudentProfile } from './contexts/profile/application/UpdateStudentProfile.js';
+import { FeedStudentSegmentAdapter } from './contexts/profile/infrastructure/integration/FeedStudentSegmentAdapter.js';
+import { createProfileRouter } from './contexts/profile/infrastructure/http/profileRoutes.js';
+import { QueryStudentFeed } from './contexts/feed/application/QueryStudentFeed.js';
+import { FeedCategoryAdapter } from './contexts/classification/infrastructure/integration/FeedCategoryAdapter.js';
+import { GetStudentFeed } from './contexts/feed/application/GetStudentFeed.js';
+import { GetSegmentedFeed } from './contexts/feed/application/GetSegmentedFeed.js';
+import { MongoConvocatoriaRepository } from './contexts/feed/infrastructure/adapters/out/mongo/MongoConvocatoriaRepository.js';
+import { createFeedRouter } from './contexts/feed/infrastructure/http/feedRoutes.js';
+import { MongoProgramTargetingRepository } from './contexts/targeting/infrastructure/adapters/out/mongo/MongoProgramTargetingRepository.js';
+import { FacultyProgramResolver } from './contexts/targeting/domain/services/FacultyProgramResolver.js';
+import { MongoClassificationResultRepository } from './contexts/classification/infrastructure/adapters/out/mongo/MongoClassificationResultRepository.js';
+import { MongoClassificationRetryQueue } from './contexts/classification/infrastructure/adapters/out/mongo/MongoClassificationRetryQueue.js';
+import { ConverseWithChatbot } from './contexts/chatbot/application/ConverseWithChatbot.js';
+import { AnswerStudentQuestion } from './contexts/chatbot/application/AnswerStudentQuestion.js';
+import { InMemoryConversationContextStore } from './contexts/chatbot/infrastructure/adapters/out/memory/InMemoryConversationContextStore.js';
+import { InMemoryEscalationLog } from './contexts/chatbot/infrastructure/adapters/out/memory/InMemoryEscalationLog.js';
+import { ExtractiveChatbot } from './contexts/chatbot/infrastructure/adapters/out/extractive/ExtractiveChatbot.js';
+import { loadOfficialChannel, loadOutOfScopePolicy } from './contexts/chatbot/infrastructure/config/JsonChatbotConfig.js';
+import { KnowledgeContextBase } from './contexts/chatbot/infrastructure/integration/KnowledgeContextBase.js';
+import { RegistryConvocatoriaReference } from './contexts/chatbot/infrastructure/integration/RegistryConvocatoriaReference.js';
+import { createChatbotRouter } from './contexts/chatbot/infrastructure/http/chatbotRoutes.js';
+import { RepositoryKnowledgeBase } from './contexts/knowledge/infrastructure/adapters/out/RepositoryKnowledgeBase.js';
+import { MongoKnowledgeEntryRepository } from './contexts/knowledge/infrastructure/adapters/out/mongo/MongoKnowledgeEntryRepository.js';
+import { MongoConsolidatedMessageRegistry } from './contexts/ingestion/infrastructure/adapters/out/mongo/MongoConsolidatedMessageRegistry.js';
 import { loadProgramCatalog } from './contexts/targeting/infrastructure/config/JsonProgramCatalogProvider.js';
 import { ProgramCatalogMatcher } from './contexts/targeting/domain/services/ProgramCatalogMatcher.js';
 
@@ -85,6 +111,11 @@ async function bootstrap(): Promise<void> {
   await MongoConversationRepository.ensureIndexes(db);
   await MongoRateLimiter.ensureIndexes(db);
   await MongoDeviceRegistry.ensureIndexes(db);
+  await MongoConvocatoriaRepository.ensureIndexes(db);
+  await MongoProgramTargetingRepository.ensureIndexes(db);
+  await MongoClassificationResultRepository.ensureIndexes(db);
+  await MongoKnowledgeEntryRepository.ensureIndexes(db);
+  await MongoConsolidatedMessageRegistry.ensureIndexes(db);
 
   const clock = new SystemClock();
   const sessionConfig = readSessionConfig();
@@ -94,9 +125,10 @@ async function bootstrap(): Promise<void> {
   const programCatalogMatcher = new ProgramCatalogMatcher(programCatalog);
   const profileConfig = readProfileConfig();
 
+  const studentProfiles = new MongoStudentProfileRepository(db, profileConfig.semesterBounds);
   const profileSync = new IdentityProfileSyncAdapter(
     new SyncStudentProfileFromDirectory({
-      profiles: new MongoStudentProfileRepository(db, profileConfig.semesterBounds),
+      profiles: studentProfiles,
       clock,
       bounds: profileConfig.semesterBounds,
       programs: programCatalogMatcher
@@ -198,8 +230,73 @@ async function bootstrap(): Promise<void> {
     (res) => sessionPrincipal(res).subject
   );
 
+  // Feed segmentado (RF-17, 22) y perfil (RF-59, 60): el correo sale siempre del token.
+  const principalEmail = (res: Parameters<typeof sessionPrincipal>[0]): string => sessionPrincipal(res).subject;
+  const classificationResults = new MongoClassificationResultRepository(db);
+  const feedRouter = createFeedRouter(
+    {
+      queryFeed: new QueryStudentFeed({
+        feed: new GetStudentFeed({
+          segments: new FeedStudentSegmentAdapter(studentProfiles),
+          feed: new GetSegmentedFeed({
+            convocatoriaRepo: new MongoConvocatoriaRepository(db),
+            programTargetingRepo: new MongoProgramTargetingRepository(db),
+            facultyResolver: new FacultyProgramResolver(programCatalog),
+            classificationResultRepo: classificationResults,
+            classificationRetryQueue: new MongoClassificationRetryQueue(db)
+          })
+        }),
+        categories: new FeedCategoryAdapter(classificationResults),
+        clock
+      })
+    },
+    sessionGuard,
+    principalEmail
+  );
+  const profileRouter = createProfileRouter(
+    {
+      viewProfile: new ViewStudentProfile({
+        profiles: studentProfiles,
+        bounds: profileConfig.semesterBounds,
+        programs: programCatalogMatcher
+      }),
+      updateProfile: new UpdateStudentProfile({ profiles: studentProfiles, clock, bounds: profileConfig.semesterBounds }),
+      findDirectoryRecord: async (email) => {
+        const found = await identityProvider.findProfile(email);
+        return found === null || found.semester === undefined
+          ? null
+          : { name: found.name, email: found.email, program: found.program, semester: found.semester };
+      }
+    },
+    sessionGuard,
+    principalEmail
+  );
+
+  // Chatbot (RF-65 a 69). El proveedor es extractivo (sin modelo de IA) y el
+  // contexto de conversacion vive en memoria de la replica (ver README de `chatbot`).
+  const chatbotRouter = createChatbotRouter(
+    {
+      converse: new ConverseWithChatbot({
+        answer: new AnswerStudentQuestion({
+          chatbot: new ExtractiveChatbot(),
+          knowledgeBase: new KnowledgeContextBase(new RepositoryKnowledgeBase(new MongoKnowledgeEntryRepository(db))),
+          convocatorias: new RegistryConvocatoriaReference(new MongoConsolidatedMessageRegistry(db)),
+          escalations: new InMemoryEscalationLog(),
+          clock,
+          officialChannel: loadOfficialChannel(),
+          outOfScope: loadOutOfScopePolicy()
+        }),
+        conversations: new InMemoryConversationContextStore(),
+        clock,
+        idleMs: 30 * 60 * 1000
+      })
+    },
+    sessionGuard,
+    (res) => sessionPrincipal(res).sessionId
+  );
+
   let shuttingDown = false;
-  const app = createHttpServer([authRouter, messagingRouter], {
+  const app = createHttpServer([authRouter, messagingRouter, feedRouter, profileRouter, chatbotRouter], {
     // Listo = no estamos apagando y MongoDB responde (con tope de 2 s para no colgar el sondeo).
     isReady: async () => {
       if (shuttingDown) return false;
